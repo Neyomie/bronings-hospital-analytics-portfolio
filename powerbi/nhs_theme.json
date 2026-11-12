@@ -1,0 +1,32 @@
+{
+  "name": "Bronings NHS",
+  "dataColors": ["#005EB8", "#003087", "#41B6E6", "#768692", "#00A499", "#330072", "#AE2573", "#ED8B00", "#009639", "#DA291C"],
+  "background": "#FFFFFF",
+  "foreground": "#231F20",
+  "tableAccent": "#005EB8",
+  "good": "#009639",
+  "neutral": "#FFB81C",
+  "bad": "#DA291C",
+  "maximum": "#003087",
+  "center": "#41B6E6",
+  "minimum": "#E8EDEE",
+  "textClasses": {
+    "title": { "fontFace": "Arial", "fontSize": 14, "color": "#003087" },
+    "header": { "fontFace": "Arial", "fontSize": 12, "color": "#003087" },
+    "label": { "fontFace": "Arial", "fontSize": 10, "color": "#425563" },
+    "callout": { "fontFace": "Arial", "fontSize": 28, "color": "#005EB8" }
+  },
+  "visualStyles": {
+    "*": {
+      "*": {
+        "title": [{ "show": true, "fontColor": { "solid": { "color": "#003087" } }, "fontFamily": "Arial" }],
+        "background": [{ "show": true, "color": { "solid": { "color": "#FFFFFF" } } }]
+      }
+    },
+    "page": {
+      "*": {
+        "background": [{ "color": { "solid": { "color": "#E8EDEE" } }, "transparency": 0 }]
+      }
+    }
+  }
+}

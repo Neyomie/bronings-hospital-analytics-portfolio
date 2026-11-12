@@ -1,0 +1,183 @@
+====================================================================================================
+BRONINGS UNIVERSITY HOSPITAL GROUP
+MODULE C - KPI ANALYSIS RESULTS (TASKS 15-22)
+====================================================================================================
+Prepared by : Advanced Healthcare Data Analyst
+Data        : Cleaned exports from Module A (GEN recoded to GM; 6 duplicate inpatient episodes and
+              9 duplicate ED attendances removed; 'attended' recoded to ATT; Waiting_Days_Validated
+              used for all waiting-time figures)
+Rounding    : Percentages to 2 decimal places, GBP to the penny. Counts are exact.
+
+----------------------------------------------------------------------------------------------------
+1. DNA RATE BY SPECIALTY (TASK 15)
+----------------------------------------------------------------------------------------------------
+Formula : DNA / (ATT + DNA) x 100. Trust cancellations (CAN), patient refusals (REF) and the one
+          non-standard 'N/A' row (APT-100199) are excluded from the denominator.
+Overall : 76 DNA / 540 (464 ATT + 76 DNA) = 14.07%. Trust target <8%; NHS standard <10%. BREACH.
+
+TOP 3 DNA SPECIALTIES
+  1. OR  Orthopaedics    17 / 44 = 38.64%
+  2. URO Urology         11 / 53 = 20.75%
+  3. OPH Ophthalmology   10 / 58 = 17.24%
+
+All specialties (worst first)
+  Specialty   ATT   DNA   DNA rate
+  OR           27    17     38.64%
+  URO          42    11     20.75%
+  OPH          48    10     17.24%
+  CS           42     8     16.00%
+  RS           50     9     15.25%
+  GYN          51     8     13.56%
+  RHE          59     5      7.81%
+  GS           49     4      7.55%
+  GM           52     4      7.14%
+  EM           44     0      0.00%
+
+By Referral_Source
+  GP     74 / 416 = 17.79%
+  ED      2 /  43 =  4.65%
+  CONS    0 /  64 =  0.00%
+  SELF    0 /  17 =  0.00%
+  Every DNA but 2 comes from GP referrals. The single highest cell is Orthopaedics x GP at 51.52%
+  (17 of 33).
+
+Check: counting CAN and REF in the denominator gives the same top 3 (OR 36.17%, URO 18.97%,
+OPH 16.39%).
+
+----------------------------------------------------------------------------------------------------
+2. RTT 18-WEEK COMPLIANCE BY SPECIALTY (TASK 16)
+----------------------------------------------------------------------------------------------------
+Formula : COUNTIFS(Specialty, x, Waiting_Days_Validated, "<=126") / COUNTIFS(Specialty, x,
+          Waiting_Days_Validated, "<>") x 100. 126 days = 18 weeks.
+          579 records with a valid wait (APT-100200 excluded: its wait is negative).
+Overall : 470 / 579 = 81.17%. NHS standard 92%. BREACH.
+RAG     : Green >= 92% | Amber 85-91.9% | Red < 85%
+
+  Specialty   Within 18 wks / Total   Compliance   RAG     Breaching 92%?
+  OR              27 / 47               57.45%      RED     YES
+  OPH             46 / 61               75.41%      RED     YES
+  URO             44 / 58               75.86%      RED     YES
+  RS              46 / 60               76.67%      RED     YES
+  RHE             51 / 65               78.46%      RED     YES
+  GYN             49 / 61               80.33%      RED     YES
+  CS              44 / 52               84.62%      RED     YES
+  GM              51 / 57               89.47%      AMBER   YES
+  GS              49 / 54               90.74%      AMBER   YES
+  EM              63 / 64               98.44%      GREEN   NO
+
+SPECIALTIES BREACHING THE 92% TARGET: 9 of 10. These are OR, OPH, URO, RS, RHE, GYN, CS, GM and GS.
+Only Emergency Medicine (EM) meets it.
+
+Note: NHS England measures RTT on OPEN (incomplete) pathways only. On that basis compliance is
+54 / 130 = 41.54%, and the same 9 specialties breach (EM stays at 100.00%, 37 / 37).
+
+----------------------------------------------------------------------------------------------------
+3. WAITING TIME FOR OPEN RTT PATHWAYS (TASK 17)
+----------------------------------------------------------------------------------------------------
+Population : RTT_Status = OPEN, 130 pathways. That is 131 open pathways less APT-100200, whose wait
+             of -3 days is invalid.
+Method     : Waiting_Days_Validated; percentile = PERCENTILE.INC.
+
+90TH PERCENTILE WAITING TIME (OPEN PATHWAYS): 267 DAYS (38.14 WEEKS)
+  Average : 138.54 days
+  Median  : 156 days
+
+By specialty (days)
+  Specialty   Open   Average   Median   90th percentile
+  OR            19    253.21    268.0        360.4
+  RHE            6    190.00    184.5        278.5
+  OPH           12    179.25    184.0        242.9
+  GM             7    172.57    245.0        285.0
+  RS             9    171.00    168.0        190.0
+  URO           16    161.56    183.5        229.0
+  GS             5    158.00    178.0        182.0
+  CS            10    156.10    189.5        202.1
+  GYN            9    151.11    144.0        180.4
+  EM            37     23.38     18.0         32.8
+2 open pathways wait more than 52 weeks (364 days). The longest is APT-100143 at 423 days
+(60.43 weeks). No open pathway exceeds 104 weeks.
+
+----------------------------------------------------------------------------------------------------
+4. 30-DAY READMISSION RATE (TASK 19)
+----------------------------------------------------------------------------------------------------
+Back-fill : The 44 blank Readmission_Flag values were filled with this formula:
+            =IF(L2<>"",L2,IF(AND(F2="EMER",COUNTIFS($B:$B,B2,$I:$I,">="&(E2-30),$I:$I,"<="&E2)>0),"Y","N"))
+            (Y = emergency admission within 30 days of a previous discharge for the same NHS Number.)
+            Result: 10 back-filled as Y, 34 as N.
+Formula   : Readmissions / discharged spells x 100 (KPI 11 definition).
+
+READMISSION RATE: 112 / 1,169 = 9.58%. DOES NOT BREACH THE 10% TARGET (0.42 points below).
+  (Counting all 1,200 episodes, including the 31 not yet discharged: 114 / 1,200 = 9.50%.)
+
+By specialty (discharged spells), flagged where above 10%
+  OR    17 / 115 = 14.78%   FLAG >10%
+  URO   14 / 102 = 13.73%   FLAG >10%
+  GYN   13 / 132 =  9.85%
+  GM    10 / 105 =  9.52%
+  RHE   13 / 137 =  9.49%
+  GS    10 / 109 =  9.17%
+  EM    11 / 127 =  8.66%
+  RS     9 / 107 =  8.41%
+  CS     9 / 123 =  7.32%
+  OPH    6 / 112 =  5.36%
+
+WARNING - do not present 9.58% to the Board without this caveat. The 1,156 flags already in the EHR
+do not agree with the date logic: only 17 of the 103 existing Y flags are confirmed, and 184 existing
+N flags would become Y. Re-deriving every flag gives 211 / 1,200 = 17.58%, a clear breach. Both
+methods rely on NHS Number, and 317 inpatient NHS Numbers are linked to more than one surname
+(Module A, DQ-007). The trustworthy figure is unknown until patient identity is fixed.
+
+----------------------------------------------------------------------------------------------------
+5. THEATRE WASTED COST (TASK 20)
+----------------------------------------------------------------------------------------------------
+ASSUMPTION: No cost per session is in the data or the briefing pack. The figure below is
+back-calculated from the Company Brief (GBP 180,000/month of idle capacity at 63% vs the 85% target):
+  Cost per session = GBP 180,000 x 12 / (22% x 2,174 sessions available per year) = GBP 4,516.18
+Replace this with Finance's actual session cost when Priya provides it; every GBP figure below
+scales with it.
+
+Activity (52 weeks, 07/04/2024 to 30/03/2025)
+  Sessions available 2,174 | used 1,538 | unused 636 | utilisation 70.75% (sessions-based)
+  Average unused sessions per month: 53
+
+WASTED COST (unused sessions x cost per session)
+  MONTHLY : GBP 239,357.70
+  ANNUAL  : GBP 2,872,292.38
+
+Cost of the gap to the 85% target only (309.9 sessions/year)
+  MONTHLY : GBP 116,630.43
+  ANNUAL  : GBP 1,399,565.11
+
+Cost per case: GBP 1,393.08 (1,538 used sessions x GBP 4,516.18 / 4,986 cases completed).
+Weekly wasted cost (for the sparkline): lowest GBP 31,613.28, highest GBP 90,323.66,
+average GBP 55,236.39.
+A fixed vs variable cost split needs Finance cost-centre data and cannot be calculated from this export.
+
+Note: these exports give 70.75% sessions-based utilisation, which matches Finance's 71%, not the
+63% in the brief. That matters for Priya's reconciliation memo.
+
+----------------------------------------------------------------------------------------------------
+6. FREQUENT ED ATTENDERS (TASK 21)
+----------------------------------------------------------------------------------------------------
+Rule : Frequent_Attender_Flag = Y if the same NHS Number has more than 3 attendances (4 or more) in
+       one financial quarter. 960 unique attendances; 839 with an NHS Number (121 blanks cannot be
+       counted).
+
+FREQUENT ATTENDERS - Q4 2024/25 (01/01/2025 to 21/03/2025, current quarter): 14 PATIENTS
+  10 patients with 4 attendances, 4 with 5. Together they account for 60 attendances.
+Previous quarter - Q3 2024/25 (Oct to Dec 2024): 25 patients
+  19 with 4, 5 with 5, 1 with 6. Together they account for 107 attendances.
+
+Caveat: 230 ED NHS Numbers are linked to more than one surname (DQ-007). Check each flagged patient's
+name and DOB against the master list (the Task 21 lookup) before anyone acts on the list.
+
+----------------------------------------------------------------------------------------------------
+SUMMARY
+----------------------------------------------------------------------------------------------------
+  DNA rate, top 3           OR 38.64% | URO 20.75% | OPH 17.24%  (Trust overall 14.07%)
+  RTT breaching 92%         9 of 10 specialties; only EM compliant  (Trust 81.17%)
+  Open RTT 90th percentile  267 days (38.14 weeks)
+  Readmission rate          9.58%, below 10% (OR and URO above 10%; see the data caveat)
+  Theatre wasted cost       GBP 239,357.70 per month | GBP 2,872,292.38 per year (assumed GBP 4,516.18/session)
+  Frequent ED attenders     14 patients in Q4 2024/25 (25 in Q3)
+====================================================================================================

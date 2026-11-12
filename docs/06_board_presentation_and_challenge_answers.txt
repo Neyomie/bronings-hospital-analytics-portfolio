@@ -1,0 +1,258 @@
+BRONINGS UNIVERSITY HOSPITAL GROUP
+PHASE 8 - EXECUTIVE BOARD PRESENTATION
+
+Audience: Medical Director, Finance Director, COO, Director of Operations (Tom Nguyen)
+Length: 20 minutes, 12 slides, plus Q&A
+Data: validated extracts, Oct 2024 to Mar 2025 (Snowflake BRONINGS_ANALYTICS)
+
+
+1. HEADLINE FINDING
+
+Only 41.54% of our open RTT pathways are within 18 weeks against the 92% NHS standard (76 patients breaching across 9 of 10 specialties), and 10 critical data quality issues sit underneath the figures NHS England will ask about in two weeks.
+
+
+2. SLIDE OUTLINE (with speaker notes)
+
+SLIDE 1. Headline finding (30 seconds)
+Content:
+- RTT 41.54% vs 92% standard.
+- 76 open pathways breaching 18 weeks.
+- 10 critical data quality issues.
+- One line: "We have a performance problem and a data problem, and the second hides the size of the first."
+Speaker notes: Open with the number, not the method. Tell the Board there are three asks at the end: approve the identity fix, the Orthopaedic recovery plan and agency controls.
+
+SLIDE 2. Current performance 1: RTT and DNA (90 seconds)
+Content:
+- RTT compliance, open pathways: 41.54% (54 of 130). RED.
+  - 9 of 10 specialties breach.
+  - Only Emergency Medicine meets 92% (37 of 37).
+- Longest waits:
+  - 90th percentile wait: 267 days (38 weeks).
+  - 2 patients over 52 weeks; none over 104 weeks.
+- Outpatient DNA rate: 14.07% (76 DNA / 540) vs Trust target 8% and NHS benchmark 10%. RED.
+  - Orthopaedics 38.64%, Urology 20.75%, Ophthalmology 17.24%.
+  - 74 of 76 DNAs were GP-referred.
+Speaker notes: These two failures are linked. Every DNA is a slot lost to an RTT patient. Orthopaedics is worst on both: 17 of its 19 open pathways are over 18 weeks, and it has the highest DNA rate.
+
+SLIDE 3. Current performance 2: theatre and ED (90 seconds)
+Content:
+- Theatre utilisation, sessions-based: 70.75% (1,538 of 2,174 sessions) vs 85% target. RED.
+  - 636 sessions unused in the year (53 a month).
+- ED 4-hour compliance: 80.10% of all attendances vs 95% standard and 90% Trust target. AMBER.
+  - Above the 78% interim target, but not robust (see Q1).
+- Strengths to acknowledge:
+  - ALOS 3.88 days (target under 4.5).
+  - LWBS 2.40% (target under 5%).
+Speaker notes: Unused theatre capacity sits next to the worst RTT backlog. That gap is the opportunity in recommendation 2. Say the ED figure is a range, not a point; the explanation is in Q1.
+
+SLIDE 4. Data quality: what was wrong (90 seconds)
+Content:
+- 49 issues logged across 5 systems: 10 Critical, 29 Major, 9 Minor.
+- Patient identity:
+  - No NHS Number is shared across outpatient, inpatient and ED.
+  - 16 outpatient NHS Numbers (52 appointments) carry conflicting surnames or dates of birth.
+  - 144 records have no NHS Number.
+- Coding: 28 episodes without an HRG code. Completeness 97.67% vs the 98% standard; GBP 51,800 unpaid.
+- ED: 39 blank breach flags. 141 records coded DIED (14.6%, implausible) and 118 coded LEFT (an undefined code).
+- Three different DNA figures were in circulation: 9.8%, 12.4% and 14.1%.
+Speaker notes: None of these are cosmetic. Four block or corrupt statutory returns: SUS, the A&E return, the RTT return and cancelled operations.
+
+SLIDE 5. Data quality: what we fixed (90 seconds)
+Content:
+- Retired code GEN recoded to GM in 24 records across 5 systems, each with an audit trail.
+- Duplicates removed: 6 inpatient episodes, 9 ED attendances.
+- 24 ST-99 test records removed.
+- Waiting_Days validated: 28 text values derived from RTT_Weeks; 1 negative wait excluded.
+- Length of stay recalculated from dates (6 negative values in the export).
+- Single signed-off definitions for every KPI, including DNA = DNA / (ATT + DNA).
+- Automated weekly DQ score (Python):
+  - Trust average 96.8 internal.
+  - ED is the only Amber system, at 92.4.
+  - Published DQMI is still 52 against a target of 75.
+Speaker notes: The internal score shows the cleaning works. The DQMI figure shows the source systems still need fixing. Both are true.
+
+SLIDE 6. Investigation findings 1: SQL insights 1 to 3 (2 minutes)
+Content:
+1. RTT: 76 patients breaching across 9 of 10 specialties.
+   - Respiratory has every open patient over 18 weeks (9 of 9).
+   - Orthopaedics has the most breaches (17).
+2. Duplicate patients: 131 NHS Numbers repeat in outpatients.
+   - 115 are genuine repeat attenders.
+   - 16 carry conflicting identity data.
+3. HRG revenue leakage: 28 of 1,204 episodes (2.33%) uncoded, GBP 51,800 at risk.
+   - Emergency Medicine alone: 8 episodes, GBP 14,800.
+Speaker notes: Every finding comes from a commented T-SQL query that the next analyst can re-run. This is not a one-off spreadsheet.
+
+SLIDE 7. Investigation findings 2: SQL insights 4 and 5 (2 minutes)
+Content:
+4. Agency spend: 252 confirmed agency shifts, GBP 97,020 in 8 weeks.
+   - Ward W-05 is highest: 42 shifts, GBP 16,170.
+   - Every ward runs at about twice the 8% target.
+5. "Lost referrals" query: all 129 open pathways show no inpatient or ED activity.
+   - This is a linkage failure, not 129 lost patients.
+   - It proves cross-system KPIs, including readmissions, cannot be trusted yet.
+Supporting points:
+- One consultant (Emergency Medicine) accounts for 19 of the Trust's 33 hospital-initiated outpatient cancellations (29.69% of their appointments).
+- Clinic CL-103 (Orthopaedics) has a 35.42% DNA rate.
+Speaker notes: Insight 5 is the most important finding in the presentation. It is why identity is recommendation 1.
+
+SLIDE 8. KPI framework: 18 agreed definitions (2 minutes)
+Content:
+- 18 KPIs, each with:
+  - an exact formula
+  - a source table and column
+  - the NHS standard
+  - a Trust target
+  - a named owner
+  - an action trigger
+- DNA: one formula, DNA / (ATT + DNA). Three earlier versions retired:
+  - 9.8% counted the header row and cancellations.
+  - 12.4% was a number typed in September 2024.
+  - 14.1% used a calendar month instead of the financial quarter.
+- Theatre has two named measures:
+  - 07a, hours-based capped touch time: the GIRFT national standard and the headline.
+  - 07b, sessions-based session uptake.
+- 6 KPIs cannot yet be measured, because pathway ID, referral and clock dates, cancellation reasons and the daily bed base are not exported.
+Speaker notes: Ask the Board to approve the framework today. That ends the argument about which figure is right.
+
+SLIDE 9. Dashboards: Power BI (90 seconds)
+Content:
+- Screenshot: Executive Summary RAG scorecard. Status:
+  - Red: DNA, RTT, theatre, agency.
+  - Amber: 4-hour, HRG.
+  - Green: LWBS, ALOS, readmission.
+- Six pages: Executive Summary, ED, Outpatient Waiting, Capacity, Finance, Workforce.
+- 12 DAX measures, with 85% and 92% occupancy reference lines and a 12-week waiting-list forecast.
+- Connected to Snowflake with a daily scheduled refresh. This replaces the 6-hour monthly PowerPoint.
+Speaker notes: Show the Outpatient Waiting page. The forecast shows the open list falling from 18 to 6 a week, but the breaches are already in the queue.
+
+SLIDE 10. Dashboards: Tableau and automation (90 seconds)
+Content:
+- Screenshot: Tableau Public Executive Summary. Same validated data, same KPI values as Power BI.
+- Python automation: the weekly waiting-list exception report now runs in 0.6 seconds, against 90 minutes by hand.
+  - That frees 78 hours a year of Sarah Okafor's time.
+  - It also removes the single-person dependency.
+- Output: a 9-sheet Excel report including a patient-level list of the 76 breaches and weekly DQ scores.
+Speaker notes: For NHS England, this is the evidence of an analytical function, not a spreadsheet.
+
+SLIDE 11. Recommendations (3 minutes)
+Content: the three recommendations in section 3, each with cost or benefit, owner and date.
+Speaker notes: Lead with identity, because nothing cross-system is credible without it. Then Orthopaedics, then agency.
+
+SLIDE 12. Decisions needed today and the next two weeks (60 seconds)
+Content:
+- Board decisions:
+  1. Approve the 18-KPI framework.
+  2. Approve the linkage-key project.
+  3. Approve the Orthopaedic session reallocation.
+  4. Approve agency booking controls.
+- Before the NHS England review:
+  - clear the 28 HRG blanks
+  - correct the 39 blank ED breach flags
+  - validate the 76 RTT breaches on the PTL
+Speaker notes: Close on what the Board must decide, not on what the analyst did.
+
+
+3. TOP 3 RECOMMENDATIONS
+
+R1. Fix patient identity and coding before the NHS England review (Owners: Daniel Walsh, Fiona Lawson, Marcus Reid; start this week)
+Actions:
+- Supply a common linkage key across PAS, EHR and EDIS.
+- Trace the 144 missing NHS Numbers through PDS.
+- Resolve the 16 conflicting identities.
+- Code the 28 HRG blanks and 27 diagnosis/procedure blanks before the SUS freeze.
+Impact:
+- Recovers GBP 51,800 of income in this extract (about GBP 103,600 a year at the same rate).
+- Protects the GBP 380,000 CQUIN tied to data quality (DQMI 52 vs 75).
+- Makes the readmission rate measurable. Today it reads 9.58% or 17.58% depending on method.
+
+R2. Orthopaedic recovery: move unused theatre sessions and cut DNAs (Owners: Divisional Director Surgery, Theatre Manager, Outpatients Manager; 12-week plan)
+Actions:
+- Reallocate 2 of the 53 sessions a month that currently go unused to Orthopaedic lists.
+- At 3.24 cases per session (4,986 cases / 1,538 sessions), 24 sessions over 12 weeks treats about 78 patients. That is enough to clear Orthopaedics' 17 breaches, and the Trust's 76 if extended.
+- Add SMS reminders at 7 days and 48 hours for GP-referred appointments, targeting Orthopaedics' 38.64% DNA rate.
+Impact:
+- RTT compliance improves from 41.54%.
+- Avoids 52-week breach fines (about GBP 14,000 per breach; 2 patients already over 52 weeks).
+- Closing the theatre gap to 85% is worth GBP 116,630.43 a month (GBP 1,399,565.11 a year) at the assumed GBP 4,516.18 per session.
+
+R3. Agency booking controls (Owners: Adaeze Obi, Priya Chakrabarti; from next roster period)
+Actions:
+- Executive sign-off for any agency shift on a ward above 15% agency share. Start with W-05 (18.83%).
+- Make Agency_Flag mandatory in WRS (15 shifts currently unclassified).
+- Exclude ST-99 test records from the export.
+Impact:
+- Agency is 16.57% of shifts against the 8% target.
+- Bringing it to target removes about 130 agency shifts per 8 weeks: GBP 50,173.20 per 8 weeks, about GBP 326,126 a year.
+
+
+4. CHALLENGE QUESTION ANSWERS
+
+Q1. "How confident are you in these figures?"
+Confidence varies by figure, so I grade each one.
+
+High confidence (counted directly, no judgement needed):
+- Theatre sessions: 1,538 of 2,174 (70.75%).
+- 28 blank HRG codes (GBP 51,800).
+- 252 confirmed agency shifts (GBP 97,020).
+- 76 RTT breaches among 130 open pathways with a valid wait.
+
+Medium confidence:
+- DNA 14.07%.
+  - Two non-standard status values affect the third decimal place (14.07% vs 14.10%).
+- RTT 41.54%. The export has no referral or clock-start date, so the wait can only be checked against RTT_Weeks.
+  - 28 waits were derived from RTT_Weeks.
+  - The 312 and 47 long-wait counts quoted previously cannot be reproduced from this extract.
+- ED 4-hour compliance is a range, not a point: 79.79% to 83.17%.
+  - 39 breach flags are blank and 35 attendances have no departure time.
+  - 83.17% assumes all 39 met the target; 79.79% assumes none did.
+
+Low confidence:
+- Readmissions read 9.58% from the stored flags but 17.58% when re-derived from dates. 317 inpatient NHS Numbers have conflicting surnames, so neither is reliable yet.
+- Bed occupancy cannot be calculated. The extract is a sample of admissions (5% to 15% census), not the full 380-bed hospital.
+
+Q2. "What assumptions did you make?"
+Seven assumptions, all documented in the DQ Issue Log and KPI Framework:
+1. Theatre cost per session is GBP 4,516.18, back-calculated from the Company Brief's GBP 180,000 a month. No cost per session exists in any export. Finance should replace it.
+2. The agency budget is a placeholder: the cost if agency ran at the 8% target. That gives the GBP 50,173.20 variance.
+3. The 15 blank agency flags are excluded from the headline. Worst case adds GBP 5,775 (range GBP 97,020 to GBP 102,795).
+4. GEN was mapped to GM. This may be wrong for 2 theatre rows and 2 outpatient records that sit in Orthopaedic and Respiratory clinics.
+5. RTT is measured on open pathways at 126 days. The negative wait (APT-100200) is excluded.
+6. Duplicates: the first record is kept. 2 exact inpatient copies were removed; 4 near-duplicates and 9 ED near-duplicates still need clinical review.
+7. ST-99 records are test data and excluded (24 shifts, 4 of them agency).
+
+Q3. "What happens if we don't act on your recommendations?"
+Five consequences, each with a figure:
+- NHS England review, in two weeks: we present 41.54% RTT compliance. We can neither prove nor correct our own long-wait numbers, because the export has no clock dates.
+- Breach fines: 2 patients are already over 52 weeks, at about GBP 14,000 each. Orthopaedics' 90th-percentile wait is already 360 days, so more will cross.
+- Income:
+  - HRG leakage continues at about GBP 103,600 a year.
+  - The GBP 380,000 CQUIN stays at risk while DQMI is 52.
+- Agency: overspend continues at about GBP 326,000 a year above the 8% target.
+- Theatres: 636 sessions a year stay idle while 76 patients breach. At the assumed rate that is GBP 1.4 million a year of capacity below the 85% target.
+- Governance: the Board keeps receiving three different DNA figures (9.8%, 12.4%, 14.1%), and no one can defend the readmission rate.
+
+Q4. "Which KPI would you improve first and why?"
+RTT 18-week compliance (KPI 04).
+- It is statutory, and NHS England will ask about it in week 1 of the review.
+- It is our furthest-from-target KPI: 41.54% vs 92%, a gap of 50.46 points.
+- It is the KPI that the other failures feed:
+  - DNAs (14.07%) waste slots.
+  - Unused theatre sessions (636 a year) are capacity we already pay for.
+- Fixing RTT through Orthopaedics, where 17 of 19 open pathways breach, pulls DNA and theatre utilisation up with it.
+- The one prerequisite is data. RTT clock-start validation (KPI 18) must start alongside it, so we know which breaches are real before we report the improvement.
+
+Q5. "Why are Finance and Operations calculating theatre utilisation differently?"
+They are measuring two different things, and both are arithmetically correct.
+- Sessions-based (Finance):
+  - Formula: sessions used / sessions available.
+  - Answers: did a list run in the slot we funded?
+  - Result: 1,538 / 2,174 = 70.75%. This is Finance's 71%.
+- Hours-based (Operations):
+  - Formula: patient touch time inside the planned session / planned session time.
+  - Answers: how much of a list that ran was actually used for surgery?
+  - Result: Operations reports 63%.
+- What the gap means: the 7.75-point gap between them is time lost inside lists that do run (late starts, early finishes and turnaround), on top of the 636 sessions that never ran.
+- Which is the standard: the hours-based measure is the GIRFT national standard and the one benchmarked against peers. The KPI framework makes it the headline (07a), with session uptake shown alongside it (07b).
+- Caveat: the 63% cannot be verified from our data, because the theatre system does not export session or anaesthetic times. Different documents have also swapped the labels. The validated export settles it: the sessions-based figure is 70.75%.
+- Action: we have asked Daniel to add the four time fields to the theatre system export. Until then, every Board paper names both figures.

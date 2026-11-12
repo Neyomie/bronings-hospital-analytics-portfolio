@@ -1,0 +1,341 @@
+BRONINGS UNIVERSITY HOSPITAL GROUP
+18-KPI FRAMEWORK DOCUMENT (PHASE 5, KPI DESIGN WORKSHOP)
+
+To: Tom Nguyen, Director of Operations
+cc: Sarah Okafor, Priya Chakrabarti, Daniel Walsh, Marcus Reid, Fiona Lawson, Adaeze Obi
+From: Advanced Healthcare Data Analyst
+Status: For sign-off. Targets marked PROPOSED need approval at the governance meeting.
+
+HOW TO READ THIS DOCUMENT
+
+Each KPI has the eight required fields plus a baseline line. Baselines were verified from the validated exports in Phases 3 and 4. Where a KPI cannot be calculated from current data, the baseline says so and names the missing data.
+
+Data sources use the SQL Server tables Daniel loaded (BroningsAnalytics, dbo schema). Column names match the CSV exports exactly.
+
+Standard rules for every KPI:
+- Count unique record IDs. Exact duplicates are removed first.
+- Blank or text values in a numeric field are excluded and logged; they are never counted as zero.
+- The reporting period is the financial quarter (or month, for statutory returns), filtered on the event date named in the formula.
+- Specialty code GEN is mapped to GM before any grouping.
+- ST-99 workforce records are test data and always excluded.
+
+RAG convention: GREEN meets the Trust target, AMBER is within the tolerance stated, RED is worse than the tolerance.
+
+
+SUMMARY TABLE
+
+No.  KPI                              Baseline (verified)        Trust target          NHS standard
+01   ED 4-hour compliance (4HT)       83.17%                     90%                   95% (interim 78%)
+02   ED LWBS rate                     2.40% (14.69% with LEFT)   <5% PROPOSED          No standard; <5% benchmark
+03   DNA rate                         14.07%                     <8%                   <10%
+04   RTT 18-week compliance           41.54% (open pathways)     88%                   92% (interim 65% Mar 2026)
+05   RTT waiting list size            131 open pathways          Reduce MoM PROPOSED   Plan trajectory
+06   52-week waiters (52WW)           2 (0 over 104 weeks)       0                     0 (<1% of list Mar 2026)
+07a  Theatre utilisation, hours       63% (Operations figure)    85%                   85% GIRFT capped touch time
+07b  Theatre session uptake           70.75%                     95% PROPOSED          None (local measure)
+08   Cancelled operations rate        6.74% (proxy, minimum)     <1% PROPOSED          28-day rebooking rule
+09   Bed occupancy rate (BOR)         Not calculable             <85%                  <92%
+10   Average length of stay (ALOS)    3.87 days                  <4.5 days             <4.5 days
+11   30-day readmission rate          9.58% (unreliable)         <10%                  <10%
+12   HRG coding completeness          97.67%                     98%                   98%
+13   Agency spend % of pay bill       16.32% of hours (proxy)    <8%, under review     3.2% cap
+14   Cost per patient episode (CPE)   Not calculable             Peer median PROPOSED  NCC benchmark
+15   Patient safety incident rate     Not calculable             Trend; 0 never events None numeric (PSIRF)
+16   Staff vacancy rate               Not calculable             Nat. average PROPOSED None (benchmark)
+17   DQMI score                       52                         75                    75
+18   RTT clock start/stop accuracy    Not measured               >=95% PROPOSED        100% RTT Rules
+
+
+KPI 01. ED 4-HOUR COMPLIANCE (4HT)
+
+1. Name / abbreviation: ED 4-hour target compliance (4HT).
+2. Formula:
+   4HT % = COUNT(DISTINCT Attendance_ID WHERE ED_Minutes BETWEEN 0 AND 240) / COUNT(DISTINCT Attendance_ID) x 100
+   where ED_Minutes = DATEDIFF(minute, Arrival_Date + Arrival_Time, Departure date + Departure_Time). Add 1,440 minutes when the departure time is earlier than the arrival time (crossed midnight).
+   Calculate from the times, not from the Four_Hour_Breach flag. Attendances with no departure time stay in the denominator and count as non-compliant until corrected.
+3. Data source: dbo.EDAttendances: Attendance_ID, Arrival_Date, Arrival_Time, Departure_Time, Total_ED_Time_Minutes (check only).
+4. NHS England standard: 95% constitutional standard. Interim operational target 78% (March 2025, retained for March 2026).
+5. Trust target: 90%. GREEN >=90%, AMBER 78-89.9%, RED <78%.
+6. Operational owner: Clinical Director, Urgent and Emergency Care. Reported by Sarah Okafor, Performance Manager.
+7. Business decision: Where flow breaks (triage, specialty review, waiting for a bed); whether to open escalation capacity; ED staffing levels.
+8. Action trigger: RED for one week → Clinical Director runs a breach review of the longest 20 waits within 5 working days. RED for two consecutive weeks → escalate to Tom Nguyen and the daily site meeting, and open escalation beds under the surge plan.
+Baseline: 83.17% (766 of 921 attendances with valid times). 79.79% if the 39 attendances with missing or negative times are counted as breaches.
+
+
+KPI 02. ED LEFT WITHOUT BEING SEEN RATE (LWBS)
+
+1. Name / abbreviation: ED Left Without Being Seen rate (LWBS).
+2. Formula: LWBS % = COUNT(DISTINCT Attendance_ID WHERE Departure_Code = 'LWBS') / COUNT(DISTINCT Attendance_ID) x 100
+3. Data source: dbo.EDAttendances: Attendance_ID, Departure_Code, Seen_by_Clinician_Time (validation: an LWBS record should have no seen time).
+4. NHS England standard: No current national standard. Historically benchmarked at under 5%.
+5. Trust target: <5% PROPOSED. GREEN <5%, AMBER 5-7%, RED >7%.
+6. Operational owner: ED Matron.
+7. Business decision: Triage staffing and streaming. Crowding is a safety risk, because patients who leave unseen may come back sicker.
+8. Action trigger: AMBER → ED Matron reviews triage-to-clinician times for that week. RED → patient safety review of LWBS patients with triage category 1-2, and a report to the Clinical Director within 72 hours.
+Baseline: 2.40% (23 of 960). Before this KPI can be trusted, the EDIS team must define the 118 'LEFT' records. If they are LWBS, the rate is 14.69% (RED).
+
+
+KPI 03. OUTPATIENT DNA RATE (DNA)
+
+1. Name / abbreviation: Outpatient Did Not Attend rate (DNA rate).
+2. Formula (correct definition):
+   DNA % = COUNT(Attendance_Status = 'DNA') / ( COUNT(Attendance_Status = 'ATT') + COUNT(Attendance_Status = 'DNA') ) x 100
+   Filtered on Appointment_Date within the financial quarter. Status codes are matched case-sensitively.
+   Excel (Attendance_Status is column J in the current export): =COUNTIFS(J:J,"DNA",H:H,">="&Start,H:H,"<="&End) / (COUNTIFS(J:J,"ATT",H:H,">="&Start,H:H,"<="&End) + COUNTIFS(J:J,"DNA",H:H,">="&Start,H:H,"<="&End))
+   Excluded from both numerator and denominator: CAN (cancelled by the hospital), REF (patient refused or rebooked in advance), blanks and non-standard values.
+3. Data source: dbo.OutpatientAppointments: Appointment_ID, Attendance_Status, Appointment_Date, Specialty_Code, Clinic_Code, Referral_Source.
+4. NHS England standard: <10% (Company Brief). No statutory target.
+5. Trust target: <8%. GREEN <8%, AMBER 8-10%, RED >10%.
+6. Operational owner: Outpatients Manager. Specialty breakdown goes to each Clinical Director.
+7. Business decision: Reminder services (SMS 7 days and 48 hours before), booking rules and clinic overbooking levels. Every DNA is a lost slot for an RTT patient.
+8. Action trigger: A specialty RED for a month → the Outpatients Manager targets that specialty's GP-referred bookings for reminder and partial-booking checks. Trust-wide RED for a quarter → item on the Planned Care board agenda.
+Baseline: 14.07% (76 DNA / 540 ATT + DNA), RED. Worst: Orthopaedics 38.64%, Urology 20.75%, Ophthalmology 17.24%.
+
+Why the three previously used formulas were wrong:
+- Version A, 9.8% (Performance, KPI_Summary D14): =COUNTIF(F:F,"DNA")/COUNTA(F:F).
+  COUNTA counts the header row, so it divides by rows + 1. It also puts CAN (and REF) appointments in the denominator; the patient had no chance to miss a slot the hospital cancelled. Both errors make the rate look lower than it is.
+  It also uses a whole-column reference with no date filter, so the period changes every time data is pasted in. In the export we now receive, column F is Consultant_Code, not the status, so the formula would return 0.
+- Version B, 12.4% (Finance_Reconciliation B7): not a formula. It is a number typed in September 2024, linked to no data, so it cannot change when performance changes and nobody can audit it. This is the figure the Board has been seeing.
+- Version C, 14.1% (PAS report): uses a calendar month instead of the financial quarter, so it covers different appointments from the other two figures and cannot be compared with them or with the quarterly returns.
+Also not adopted: the Process Notes suggestion (DNA / all non-blank rows) and the four-code denominator in the Phase 2 pack draft. Both still include CAN and REF, which dilutes the rate to 13.15% (76 / 578). The definition above replaces every earlier version.
+
+
+KPI 04. RTT 18-WEEK COMPLIANCE (RTT)
+
+1. Name / abbreviation: Referral to Treatment 18-week compliance, incomplete pathways (RTT).
+2. Formula: RTT % = COUNT(RTT_Status = 'OPEN' AND Waiting_Days BETWEEN 0 AND 126) / COUNT(RTT_Status = 'OPEN' AND Waiting_Days >= 0) x 100, at month end.
+   126 days = 18 weeks. Records with a negative or non-numeric Waiting_Days go to KPI 18 validation, not to this KPI.
+3. Data source: dbo.OutpatientAppointments: RTT_Status, Waiting_Days, RTT_Weeks (check: = Waiting_Days / 7), Specialty_Code. Referral_Date and clock-start date are required, but are NOT in the current export (Daniel to add).
+4. NHS England standard: 92% constitutional standard. Interim: 65% by March 2026, with every trust improving by at least 5 points.
+5. Trust target: 88%. GREEN >=88%, AMBER 65-87.9%, RED <65%.
+6. Operational owner: Divisional Director, Planned Care. Statutory submission by Sarah Okafor.
+7. Business decision: Which specialties need extra capacity, insourcing or waiting-list validation. Feeds the monthly statutory RTT return.
+8. Action trigger: Any specialty RED → a weekly patient-tracking-list (PTL) meeting led by the specialty general manager, with a recovery trajectory within 2 weeks. Trust RED → a capacity plan to Tom Nguyen within 30 days.
+Baseline: 41.54% (54 of 130 open pathways), RED. 76 patients breaching across 9 of 10 specialties; only EM is compliant.
+
+
+KPI 05. RTT WAITING LIST SIZE
+
+1. Name / abbreviation: RTT waiting list size, open pathways (WL).
+2. Formula: WL = COUNT(DISTINCT Pathway_ID WHERE RTT_Status = 'OPEN') at month end.
+   Interim, until Pathway_ID is exported: COUNT(DISTINCT NHS_Number + Specialty_Code WHERE RTT_Status = 'OPEN').
+3. Data source: dbo.OutpatientAppointments: RTT_Status, NHS_Number, Specialty_Code. Pathway_ID is not in the export.
+4. NHS England standard: No fixed standard; tracked against the Trust operating-plan trajectory.
+5. Trust target: Reduce month on month PROPOSED. Trajectory to be agreed with Priya Chakrabarti.
+6. Operational owner: Head of Patient Access.
+7. Business decision: Demand vs capacity. Is activity keeping pace with referrals?
+8. Action trigger: List grows for 2 consecutive months → demand and capacity review by specialty. Growth over 5% in a month → validation sprint to remove pathways that should be closed (links to KPI 18).
+Baseline: 131 open pathway records (130 with a valid wait).
+
+
+KPI 06. PATIENTS WAITING OVER 52 WEEKS (52WW)
+
+1. Name / abbreviation: 52-week breaches (52WW), with 104-week breaches reported separately.
+2. Formula: 52WW = COUNT(RTT_Status = 'OPEN' AND Waiting_Days > 364) at month end. Also reported as a % of the waiting list (KPI 05), and as 104WW = COUNT(... Waiting_Days > 728).
+3. Data source: dbo.OutpatientAppointments: RTT_Status, Waiting_Days. A clock-start date is needed for audit.
+4. NHS England standard: Zero. Interim: under 1% of the waiting list by March 2026.
+5. Trust target: 0. GREEN 0, AMBER 1-5, RED >5 or any 104-week wait.
+6. Operational owner: Head of Patient Access.
+7. Business decision: Treatment order (clinical priority, then longest wait); fines of about GBP 14,000 per breach.
+8. Action trigger: Any patient over 40 weeks → named on the weekly PTL with a booked treatment date. Any breach → clinical harm review and a report to the Divisional Director within 7 days. Any 104-week wait → immediate escalation to Tom Nguyen.
+Baseline: 2 open pathways over 52 weeks (1.54% of 130). The longest is APT-100143 at 423 days; 0 over 104 weeks. The 312 and 47 in earlier reports cannot be reproduced from this export.
+
+
+KPI 07. THEATRE UTILISATION (TWO DEFINITIONS)
+
+Theatre utilisation is measured two ways, and they answer different questions. Both are documented here.
+
+KPI 07a. Theatre utilisation, hours-based (capped touch time) - THE NHS STANDARD
+1. Name / abbreviation: Capped touch-time theatre utilisation (TU-hrs).
+2. Formula: TU-hrs % = SUM(touch-time minutes inside the planned session) / SUM(planned session minutes) x 100
+   Touch time = anaesthetic start to patient leaving theatre. Time after the planned session end is cut off ("capped"). Sessions cancelled in advance are excluded from the denominator; sessions cancelled on the day are included.
+3. Data source: dbo.TheatreUtilisation does NOT contain the fields needed. Daniel must add to the TMS export: Session_Planned_Start, Session_Planned_End, Anaesthetic_Start, Patient_Out_Of_Theatre (per case) and Session_Status. Overrun_Minutes (already exported) is used only to check the cap.
+4. NHS England standard: This is the national definition. GIRFT uses capped touch-time utilisation as its key theatre productivity measure, with an 85% target (Model Health System).
+5. Trust target: 85%. GREEN >=85%, AMBER 75-84.9%, RED <75%.
+6. Operational owner: Theatre Manager. Accountable executive: Divisional Director, Surgery.
+7. Business decision: Productivity inside the lists: late starts, early finishes, turnaround time, and how lists are booked.
+8. Action trigger: A specialty RED for 4 consecutive weeks → the Theatre Manager runs a list-level review (late starts, early finishes, turnaround) with the specialty lead. Trust RED for a month → a theatre productivity plan goes to the Planned Care board.
+Baseline: 63% (Operations' current figure; cannot be checked until the time fields are exported).
+
+KPI 07b. Theatre session uptake, sessions-based
+1. Name / abbreviation: Theatre session uptake (TU-sess).
+2. Formula: TU-sess % = SUM(Sessions_Used) / SUM(Sessions_Available) x 100. Weeks where Sessions_Used > Sessions_Available are flagged as data errors and corrected at source; the old workaround (setting Available = Used) is retired.
+3. Data source: dbo.TheatreUtilisation: Week_Ending, Theatre_ID, Sessions_Available, Sessions_Used, Specialty_Code.
+4. NHS England standard: No national standard. This is a local capacity measure.
+5. Trust target: 95% PROPOSED, because a session that is not used at all is pure lost capacity. GREEN >=95%, AMBER 85-94.9%, RED <85%.
+6. Operational owner: Theatre Manager. Session release and reallocation are agreed with the Divisional Director, Surgery.
+7. Business decision: Whether whole sessions should be released and reallocated (e.g. to Orthopaedics, which has the longest waits), and how much funded capacity is unused.
+8. Action trigger: A session released with less than 6 weeks' notice → offered to the specialty with the most 52-week risk. A theatre RED for 4 weeks → review of its session allocation in the job-planning round.
+Baseline: 70.75% (1,538 of 2,174 sessions; 636 unused in the year), RED.
+
+Which figure is which: the validated exports give a sessions-based figure of 70.75%, which matches Finance's 71%. The 63% reported by Operations is therefore the hours-based figure. The annotation in the Process Notes has these reversed.
+
+Recommendation for the Phase 6 dashboard:
+- Show both, as two separately named tiles side by side. Never use the bare label "Theatre utilisation". Each tile states its definition and denominator in its tooltip.
+- The headline KPI is 07a, hours-based capped touch time, because it is the national GIRFT definition and the only one we can benchmark against peers. 07b sits next to it as "Session uptake".
+- Add a small "gap" annotation (07b minus 07a). It shows how much time is lost inside sessions that do run: late starts, early finishes and turnaround.
+- Until TMS exports the time fields, show 07a as "awaiting data" with Operations' 63% labelled "manual, unverified". Do not replace it with the sessions figure.
+- Board papers quote both figures with their names, which ends the 63% vs 71% argument.
+
+
+KPI 08. CANCELLED OPERATIONS RATE (CANCOPS)
+
+1. Name / abbreviation: Last-minute cancelled elective operations rate (CancOps).
+2. Formula (statutory): CancOps % = COUNT(elective operations cancelled by the hospital on or after the day of admission for non-clinical reasons) / COUNT(elective admissions, Admission_Type = 'ELEC') x 100, plus a count of cancelled patients not rebooked within 28 days.
+   Interim proxy until reason and date are exported: SUM(Cancellations_Trust) / SUM(Cases_Planned) x 100.
+3. Data source: dbo.TheatreUtilisation: Cancellations_Trust, Cancellations_Patient, Cases_Planned, Week_Ending. dbo.InpatientAdmissions: Admission_Type. Cancellation date and reason are needed from TMS.
+4. NHS England standard: Every patient cancelled at the last minute for non-clinical reasons must be offered a new date within 28 days; reported in the statutory quarterly Cancelled Elective Operations return.
+5. Trust target: <1% PROPOSED, and zero 28-day breaches. GREEN <1%, AMBER 1-2%, RED >2% or any 28-day breach.
+6. Operational owner: Divisional Director, Surgery.
+7. Business decision: Protecting elective beds and lists from emergency pressure; ring-fencing elective capacity.
+8. Action trigger: Any 28-day breach → escalate to the Divisional Director the same week and rebook within 7 days. RED for a month → review of elective bed ring-fencing at the patient flow meeting.
+Baseline: 6.74% (359 Trust cancellations / 5,324 cases planned). This is a minimum: 30 Trust-cancellation values are blank, and the proxy includes all hospital cancellations, not only last-minute ones.
+
+
+KPI 09. BED OCCUPANCY RATE (BOR)
+
+1. Name / abbreviation: General and acute bed occupancy rate (BOR).
+2. Formula: BOR % = SUM over days(patients in a bed at midnight) / SUM over days(available beds) x 100
+   Patient in bed at midnight on day D = Admission_Date <= D AND (Discharge_Date IS NULL OR Discharge_Date > D), per Ward_Code. Wards W-01 to W-07 only; W-08 is closed.
+3. Data source: dbo.InpatientAdmissions: Episode_ID, Admission_Date, Discharge_Date, Ward_Code. Available beds per ward per day (380 total) come from the bed management system and are not in the exports.
+4. NHS England standard: <92%.
+5. Trust target: <85%. GREEN <85%, AMBER 85-92%, RED >92%.
+6. Operational owner: Head of Patient Flow (site management).
+7. Business decision: Escalation beds, discharge planning and the emergency vs elective bed split. High occupancy drives ED delays (KPI 01).
+8. Action trigger: AMBER for 3 consecutive days → discharge-focused board rounds on all wards. RED on any day → OPEL escalation and a site huddle chaired by the Head of Patient Flow.
+Baseline: Not calculable. The extract has no daily bed base, and 31 spells with no discharge date would inflate the count. Weekly concurrent-patient counts (Phase 4, Query 4) show W-01 above 10 patients in 11 of 25 weeks.
+
+
+KPI 10. AVERAGE LENGTH OF STAY (ALOS)
+
+1. Name / abbreviation: Average length of stay (ALOS).
+2. Formula: ALOS = SUM(DATEDIFF(day, Admission_Date, Discharge_Date)) / COUNT(DISTINCT Episode_ID with a Discharge_Date in the period). Reported separately for ELEC and EMER.
+   Calculate from the dates. Do not use the stored Length_of_Stay column (6 negative values) or Bed_Days (34 mismatches).
+3. Data source: dbo.InpatientAdmissions: Episode_ID, Admission_Date, Discharge_Date, Admission_Type, Specialty_Code.
+4. NHS England standard: <4.5 days (Company Brief). Benchmarked by HRG through the Model Health System.
+5. Trust target: <4.5 days. GREEN <4.5, AMBER 4.5-5.0, RED >5.0.
+6. Operational owner: Integrated Discharge Team Manager.
+7. Business decision: Delayed discharges, frailty pathways, community capacity. Each day saved frees beds for ED admissions.
+8. Action trigger: A specialty AMBER or RED for a month → review of stranded patients (staying over 7 days) with the specialty. Any patient staying over 21 days → escalation to the weekly long-length-of-stay review.
+Baseline: 3.87 days overall (4,543 bed days / 1,173 discharged spells), GREEN. Elective 2.88 days; emergency 4.65 days (AMBER).
+
+
+KPI 11. 30-DAY EMERGENCY READMISSION RATE
+
+1. Name / abbreviation: 30-day emergency readmission rate (READM).
+2. Formula: READM % = COUNT(DISTINCT Episode_ID WHERE Admission_Type = 'EMER' AND an earlier episode with the same NHS_Number has a Discharge_Date within the 30 days before Admission_Date) / COUNT(DISTINCT Episode_ID with a Discharge_Date in the period) x 100
+   The flag is derived from dates, not taken from the stored Readmission_Flag, which does not match this logic.
+3. Data source: dbo.InpatientAdmissions: Episode_ID, NHS_Number, Admission_Date, Discharge_Date, Admission_Type, Specialty_Code, Readmission_Flag (reconciliation only).
+4. NHS England standard: <10% (Company Brief). NHS Outcomes Framework indicator.
+5. Trust target: <10%. GREEN <10%, AMBER 10-12%, RED >12%.
+6. Operational owner: Medical Director. Specialty review by each Clinical Director.
+7. Business decision: Whether patients are discharged too early, and the quality of discharge plans and follow-up.
+8. Action trigger: A specialty above 10% for a quarter → a case-note audit of 20 readmissions by that specialty's Clinical Director. Trust above 12% → report to the Quality Committee.
+Baseline: 9.58% (112 / 1,169) using the stored flags with the 44 blanks back-filled. Re-deriving every flag from dates gives 17.58%. Neither figure is reliable until the NHS Number duplication is fixed (317 inpatient NHS Numbers have conflicting surnames).
+
+
+KPI 12. HRG CODING COMPLETENESS (HRG)
+
+1. Name / abbreviation: HRG coding completeness (HRG).
+2. Formula: HRG % = COUNT(DISTINCT Episode_ID WHERE NULLIF(HRG_Code,'') IS NOT NULL) / COUNT(DISTINCT Episode_ID finished in the period) x 100
+   Reported with revenue at risk = COUNT(blank HRG) x GBP 1,850.
+3. Data source: dbo.InpatientAdmissions: Episode_ID, HRG_Code, ICD10_Code, OPCS4_Code, Discharge_Date, Specialty_Code.
+4. NHS England standard: 98%.
+5. Trust target: 98%. GREEN >=98%, AMBER 95-97.9%, RED <95%.
+6. Operational owner: Marcus Reid, Clinical Coding Manager.
+7. Business decision: Income recovery (an uncoded episode is not paid), SUS submission quality and the DQMI score.
+8. Action trigger: Below 98% at day 5 of the month → the uncoded episode list goes to Marcus Reid, to be cleared before the SUS freeze. AMBER for 2 months → coding backlog plan agreed with Priya Chakrabarti.
+Baseline: 97.67% (1,176 of 1,204), AMBER. 28 blank, GBP 51,800 at risk over 6 months.
+
+
+KPI 13. AGENCY SPEND AS % OF PAY BILL
+
+1. Name / abbreviation: Agency spend % of total pay bill (AGENCY).
+2. Formula: AGENCY % = SUM(agency staff cost) / SUM(total staff pay cost) x 100, monthly, from the ledger.
+   Operational proxy (weekly, from WRS): SUM(Hours_Worked WHERE Agency_Flag = 'Y') / SUM(Hours_Worked WHERE Agency_Flag IN ('Y','N')) x 100, excluding Staff_ID LIKE 'ST-99%'. Blank Agency_Flag rows are reported separately as unclassified.
+3. Data source: dbo.WorkforceStaffing: Agency_Flag, Hours_Worked, Staff_ID, Ward_Code, Staff_Grade. Agency and total pay costs come from the Finance ledger (not exported).
+4. NHS England standard: Agency spend capped at 3.2% of the pay bill (2024/25). 2025/26 planning requires a 30% reduction in agency spend.
+5. Trust target: <8% (Company Brief). This is well above the national cap; the recommendation is to move to 3.2% at the next planning round.
+6. Operational owner: Adaeze Obi, Workforce Planning Manager. Financial reporting by Priya Chakrabarti, Finance Business Partner.
+7. Business decision: Substantive recruitment vs temporary staffing; approval controls on agency shifts; which wards to target.
+8. Action trigger: A ward's agency share above 15% for 4 weeks → the ward manager presents a rota review to Adaeze Obi. Trust above the target for a month → executive sign-off required for every new agency booking.
+Baseline: Proxy 16.32% of hours worked (252 agency shifts of 1,521 classified, 16.57%). The ledger figure is unknown. 15 shifts have no agency flag.
+
+
+KPI 14. COST PER PATIENT EPISODE (CPE)
+
+1. Name / abbreviation: Cost per patient episode (CPE).
+2. Formula: CPE = SUM(total cost of care for the service in the period) / COUNT(DISTINCT Episode_ID finished in the period), by Specialty_Code and HRG_Code.
+3. Data source: Finance ledger / Patient Level Information and Costing System (PLICS) for costs, joined on Episode_ID to dbo.InpatientAdmissions (Episode_ID, Specialty_Code, HRG_Code, Discharge_Date).
+4. NHS England standard: No standard. Benchmarked against the National Cost Collection and Model Health System peers.
+5. Trust target: At or below the peer median PROPOSED.
+6. Operational owner: Priya Chakrabarti, Finance Business Partner.
+7. Business decision: Which services cost more than peers and why; productivity and efficiency plans.
+8. Action trigger: A specialty more than 10% above the peer median for a quarter → a deep dive by the Finance Business Partner with the Clinical Director, with findings in the efficiency plan.
+Baseline: Not calculable. No cost data in the exports.
+
+
+KPI 15. PATIENT SAFETY INCIDENT RATE (PSI)
+
+1. Name / abbreviation: Patient safety incident rate per 1,000 occupied bed days (PSI rate).
+2. Formula: PSI rate = COUNT(reported patient safety incidents in the period) / SUM(occupied bed days in the period) x 1,000, split by level of harm.
+   Occupied bed days come from the KPI 09 midnight census.
+3. Data source: Learn From Patient Safety Events (LFPSE) incident system (not in the current exports); dbo.InpatientAdmissions for bed days.
+4. NHS England standard: No numeric target. Under the Patient Safety Incident Response Framework (PSIRF), a high reporting rate with low harm indicates a healthy safety culture.
+5. Trust target: Track the trend; zero never events PROPOSED.
+6. Operational owner: Head of Patient Safety (Patient Safety Specialist). Accountable executive: Medical Director.
+7. Business decision: Where to focus safety learning; whether crowding or staffing gaps are causing harm.
+8. Action trigger: Any never event or severe-harm incident → a PSIRF learning response within 48 hours. Reporting falls more than 20% below the 12-month average → under-reporting review.
+Baseline: Not calculable. LFPSE data is needed.
+
+
+KPI 16. STAFF VACANCY RATE (VAC)
+
+1. Name / abbreviation: Staff vacancy rate (VAC).
+2. Formula: VAC % = (SUM(funded establishment WTE) - SUM(staff in post WTE)) / SUM(funded establishment WTE) x 100, by staff group and ward.
+3. Data source: ESR (Electronic Staff Record) for staff in post WTE; the Finance ledger for funded establishment. dbo.WorkforceStaffing (Staff_Grade, Ward_Code) is used only to cross-check rostered staff.
+4. NHS England standard: No target. Benchmarked against NHS England's quarterly NHS Vacancy Statistics.
+5. Trust target: At or below the national average for each staff group PROPOSED.
+6. Operational owner: Adaeze Obi, Workforce Planning Manager.
+7. Business decision: Recruitment priorities by staff group; explains reliance on agency staff (KPI 13).
+8. Action trigger: A staff group more than 2 points above the national average for a quarter → targeted recruitment plan. A ward with vacancy over 10% and agency share over 15% → joint review with KPI 13.
+Baseline: Not calculable. Establishment and WTE are not in the exports.
+
+
+KPI 17. DATA QUALITY MATURITY INDEX SCORE (DQMI)
+
+1. Name / abbreviation: Data Quality Maturity Index score (DQMI), reported with the Data Security and Protection Toolkit (DSPT).
+2. Formula: DQMI = the score NHS England publishes (0-100) for completeness, validity and coverage of our national submissions.
+   Internal weekly proxy: DQ score % = (data items checked - items failing a validation rule) / data items checked x 100, using the rules in the DQ_Issue_Log.
+3. Data source: NHS England DQMI publication; internal DQ_Issue_Log; validation queries run against all five dbo tables.
+4. NHS England standard: 75 out of 100 acceptable threshold.
+5. Trust target: 75 by the NHS England review (currently 52). Internal DQ score above 95%.
+6. Operational owner: Fiona Lawson, Information Governance Lead. Analytics produces the weekly score.
+7. Business decision: Whether reported figures can be trusted; protects CQUIN income (GBP 380,000) and reduces regulatory scrutiny.
+8. Action trigger: Internal score below 95% in any table → the owning system team must fix it before that month's statutory submission. Any new Critical issue in the DQ_Issue_Log → owner notified within 1 working day.
+Baseline: DQMI 52. 49 issues logged in Phase 3: 10 Critical, 29 Major, 9 Minor.
+
+
+KPI 18. RTT CLOCK START/STOP ACCURACY (RTT-VAL)
+
+1. Name / abbreviation: RTT clock start/stop accuracy (RTT-VAL).
+2. Formula: RTT-VAL % = COUNT(audited pathways with correct clock start, clock stop and status under the national RTT Rules) / COUNT(pathways audited) x 100, monthly.
+   Sample: at least 50 pathways a month, chosen at random, plus every pathway over 40 weeks.
+3. Data source: dbo.OutpatientAppointments: RTT_Status, Waiting_Days, Appointment_Date, Attendance_Status. Referral_Date, Clock_Start_Date and Clock_Stop_Date are required and not yet exported. Checked against clinic letters in PAS.
+4. NHS England standard: 100% compliance with the national RTT Rules Suite; ongoing waiting-list validation is expected.
+5. Trust target: >=95% PROPOSED. GREEN >=95%, AMBER 90-94.9%, RED <90%.
+6. Operational owner: Head of Patient Access (RTT Validation Lead).
+7. Business decision: Whether the RTT (KPI 04) and 52-week (KPI 06) figures are real. Likely explains the 12-18 patient monthly gap between PAS and Unify2 (closed pathways left OPEN).
+8. Action trigger: RED → the RTT return is not submitted until a validation sprint corrects the errors found. Any pathway found OPEN that should be CLOSED → corrected within 5 working days and the booking clerk retrained.
+Baseline: Not measured. Proxies: 28 Waiting_Days values held as text, 1 negative wait, and a 12-18 patient monthly PAS vs Unify2 difference.
+
+
+DECISIONS NEEDED AT GOVERNANCE
+
+1. Approve the DNA definition in KPI 03 and formally retire Versions A, B and C.
+2. Adopt KPI 07a (hours-based capped touch time) as the theatre headline, with 07b (session uptake) alongside it. Ask Daniel to add the four TMS time fields.
+3. Review the agency target: brief <8% vs national cap 3.2%.
+4. Approve the PROPOSED targets for KPIs 02, 05, 07b, 08, 14, 15, 16 and 18.
+5. Ask Daniel for the missing fields: Pathway_ID, Referral_Date and clock start/stop (PAS); cancellation reason and date (TMS); and a daily bed base. Without these, 6 of the 18 KPIs cannot be measured.
+
+Sources for national standards: Company Brief and Phase 2 KPI Research Pack; GIRFT capped touch-time utilisation definition and 85% target (PMC11488670, "Touchtime Utilisation in Operating Theatre Efficiency Optimisation").

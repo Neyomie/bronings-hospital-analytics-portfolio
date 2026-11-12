@@ -1,0 +1,4 @@
+Tableau Public dashboard (Bronings University Hospital Group - Executive Performance Dashboard):
+https://public.tableau.com/views/BroningsExecutiveDashboardv3/EmergencyDepartment?:language=en-GB&:sid=&:redirect=auth&:display_count=n&:origin=viz_share_link
+
+Built on a Snowflake extract of the same validated tables used by the Power BI report. Tableau Public has no Snowflake connector. KPI values match Power BI exactly.

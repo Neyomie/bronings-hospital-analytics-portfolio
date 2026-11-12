@@ -1,0 +1,475 @@
+BRONINGS UNIVERSITY HOSPITAL GROUP
+SQL INVESTIGATION REPORT (PHASE 4)
+
+To: Tom Nguyen, Director of Operations   cc: Daniel Walsh, Sarah Okafor, Priya Chakrabarti
+From: Advanced Healthcare Data Analyst
+Database: BroningsAnalytics on BRONINGS-SQL01\SQLEXPRESS (tables dbo.OutpatientAppointments, dbo.InpatientAdmissions, dbo.EDAttendances, dbo.TheatreUtilisation, dbo.WorkforceStaffing)
+
+HEADLINE FINDINGS
+1. RTT (most urgent): 76 of 130 open pathways breach 18 weeks across 9 of 10 specialties. Open-pathway compliance is 41.54% against 92%. Orthopaedics has the most breaches (17).
+2. Duplicate patients: 16 NHS Numbers (52 appointments) carry conflicting surnames or dates of birth.
+3. HRG leakage: 28 uncoded episodes, GBP 51,800 at risk; Emergency Medicine accounts for 8 (GBP 14,800).
+4. Agency: 252 confirmed shifts, GBP 97,020 in 8 weeks; W-05 is highest at 42 shifts (GBP 16,170).
+5. Linkage: no NHS Number matches across outpatient, inpatient and ED tables, so cross-system questions (Query 7, readmissions) cannot yet be answered.
+
+METHOD NOTES
+All 12 queries are written in T-SQL and saved with comments in Bronings_SQL_Investigation.sql. The figures come from running the same logic against the validated exports: GEN recoded to GM, blanks treated as NULL, negative waits excluded, and exact duplicate inpatient episodes removed. Every query handles blank strings, text in numeric fields and DD/MM/YYYY dates, so it gives the same answer whether the load stored blanks as '' or NULL.
+
+
+QUERY 1 - RTT BREACH BY SPECIALTY (PRIORITY)
+
+1. Business question
+Which specialties have patients waiting more than 18 weeks on open RTT pathways? Show specialty, total open pathways, patients breaching and compliance %.
+
+2. SQL query (T-SQL)
+/* QUERY 1 - RTT BREACH BY SPECIALTY (open pathways only)
+   For each specialty: open pathways, number waiting more than 18 weeks (126 days), and
+   compliance % = open pathways within 18 weeks / all open pathways.
+   NHS England standard: 92%. Worst specialty first.
+*/
+WITH OpenPathways AS (
+    SELECT  Specialty_Code,
+            TRY_CAST(Waiting_Days AS INT) AS WaitDays
+    FROM    dbo.OutpatientAppointments
+    WHERE   RTT_Status = 'OPEN'
+      AND   TRY_CAST(Waiting_Days AS INT) >= 0          -- drop invalid/negative waits
+)
+SELECT  Specialty_Code,
+        COUNT(*)                                              AS Total_Open_Pathways,
+        SUM(CASE WHEN WaitDays > 126 THEN 1 ELSE 0 END)       AS Patients_Breaching_18wks,
+        CAST(100.0 * SUM(CASE WHEN WaitDays <= 126 THEN 1 ELSE 0 END)
+             / COUNT(*) AS DECIMAL(5,2))                      AS Compliance_Pct,
+        CASE WHEN 100.0 * SUM(CASE WHEN WaitDays <= 126 THEN 1 ELSE 0 END) / COUNT(*) >= 92
+             THEN 'Meets 92%' ELSE 'BREACH' END               AS Status_vs_92pct
+FROM    OpenPathways
+GROUP BY Specialty_Code
+ORDER BY Compliance_Pct ASC;
+
+3. Key finding
+76 patients are breaching 18 weeks, out of 130 open pathways, across 9 of the 10 specialties. Trust compliance on open pathways is 41.54% (54 within 18 weeks / 130), against the 92% NHS standard.
+
+  Specialty  Open  Breaching  Compliance
+  RS            9      9         0.00%
+  OR           19     17        10.53%
+  GYN           9      8        11.11%
+  OPH          12     10        16.67%
+  RHE           6      5        16.67%
+  CS           10      8        20.00%
+  GS            5      4        20.00%
+  URO          16     11        31.25%
+  GM            7      4        42.86%
+  EM           37      0       100.00%
+
+Only Emergency Medicine meets 92%. Orthopaedics has the most patients breaching (17), followed by Urology (11) and Ophthalmology (10). Respiratory Medicine has every open patient over 18 weeks (9 of 9). One open pathway (APT-100200, -3 days) is excluded as invalid.
+
+QUERY 2 - CONSULTANT CANCELLATION RATE
+
+1. Business question
+Which consultants have the highest Trust-initiated cancellation rate? Rank within specialty using a window function.
+
+2. SQL query (T-SQL)
+/* QUERY 2 - CONSULTANT TRUST-INITIATED CANCELLATION RATE
+   CAN = cancelled by the hospital (Trust). Rate = CAN / all appointments for that
+   consultant in that specialty. RANK() orders consultants within each specialty, and a
+   second RANK() orders them across the Trust.
+*/
+WITH ConsultantActivity AS (
+    SELECT  Specialty_Code,
+            Consultant_Code,
+            COUNT(*)                                                AS Total_Appointments,
+            SUM(CASE WHEN Attendance_Status = 'CAN' THEN 1 ELSE 0 END) AS Trust_Cancellations
+    FROM    dbo.OutpatientAppointments
+    WHERE   NULLIF(Consultant_Code, '') IS NOT NULL             -- 5 rows have no consultant
+    GROUP BY Specialty_Code, Consultant_Code
+)
+SELECT  Specialty_Code,
+        Consultant_Code,
+        Total_Appointments,
+        Trust_Cancellations,
+        CAST(100.0 * Trust_Cancellations / Total_Appointments AS DECIMAL(5,2)) AS Cancellation_Rate_Pct,
+        RANK() OVER (PARTITION BY Specialty_Code
+                     ORDER BY 1.0 * Trust_Cancellations / Total_Appointments DESC) AS Rank_In_Specialty,
+        RANK() OVER (ORDER BY 1.0 * Trust_Cancellations / Total_Appointments DESC) AS Rank_Trust_Wide
+FROM    ConsultantActivity
+ORDER BY Cancellation_Rate_Pct DESC, Total_Appointments DESC;
+
+3. Key finding
+C-1009 (Emergency Medicine) has by far the highest Trust cancellation rate: 29.69% (19 of 64 appointments). That is 19 of the Trust's 33 hospital cancellations (57.58%). Next are C-1022 (Urology) at 8.62% (5 of 58) and C-1033 (Orthopaedics) at 4.44% (2 of 45). C-1051 (Respiratory) and C-1044 (Gynaecology) have none.
+
+Each specialty is run by one consultant, so every main consultant ranks 1 within their specialty. The only exception is GM, where C-1033 and C-1051 each appear once. Both rows came from records coded GEN, which sit in the Orthopaedic and Respiratory clinics, so the GEN to GM recode may be wrong for them. 5 appointments with no consultant are excluded.
+
+QUERY 3 - CLINIC DNA RATE
+
+1. Business question
+Which clinics have the highest DNA rate? Show clinic code, total appointments, DNA count and DNA rate %, excluding non-standard status values.
+
+2. SQL query (T-SQL)
+/* QUERY 3 - CLINIC DNA RATE
+   Only the four valid statuses (ATT, DNA, CAN, REF) are counted, which excludes
+   'attended' and 'N/A'. DNA rate = DNA / total valid appointments.
+*/
+SELECT  Clinic_Code,
+        COUNT(*)                                                  AS Total_Appointments,
+        SUM(CASE WHEN Attendance_Status = 'DNA' THEN 1 ELSE 0 END)  AS DNA_Count,
+        CAST(100.0 * SUM(CASE WHEN Attendance_Status = 'DNA' THEN 1 ELSE 0 END)
+             / COUNT(*) AS DECIMAL(5,2))                          AS DNA_Rate_Pct
+FROM    dbo.OutpatientAppointments
+WHERE   Attendance_Status COLLATE Latin1_General_CS_AS IN ('ATT','DNA','CAN','REF')  -- case-sensitive
+GROUP BY Clinic_Code
+ORDER BY DNA_Rate_Pct DESC;
+
+3. Key finding
+578 valid appointments counted ('attended' and 'N/A' excluded). Highest DNA rates:
+  CL-103 (Orthopaedics)   17 DNA / 48 = 35.42%
+  CL-108 (Urology)        11 DNA / 58 = 18.97%
+  CL-109 (Ophthalmology)  10 DNA / 61 = 16.39%
+Lowest: CL-106 (Emergency Medicine) 0 / 64 = 0.00%. 6 of the 10 active clinics are above the 8% target. The retired CL-OLD clinic still has 1 appointment.
+
+QUERY 4 - WARD OCCUPANCY BY WEEK
+
+1. Business question
+For each ward, count patients admitted on or before each date and not yet discharged. Which wards regularly have more than 10 concurrent patients?
+
+2. SQL query (T-SQL)
+/* QUERY 4 - WARD OCCUPANCY BY WEEK
+   Census at the end of each Sunday from 06/10/2024 to 23/03/2025. A patient counts as
+   present if admitted on or before the census date and either not yet discharged (blank)
+   or discharged after it. Then: how many weeks did each ward have more than 10 patients?
+*/
+WITH Weeks AS (                                   -- one row per Sunday census date
+    SELECT CAST('2024-10-06' AS DATE) AS Census_Date
+    UNION ALL
+    SELECT DATEADD(DAY, 7, Census_Date) FROM Weeks WHERE Census_Date < '2025-03-23'
+),
+Spells AS (                                       -- clean dates; exact duplicates removed
+    SELECT DISTINCT
+           Episode_ID, Ward_Code,
+           TRY_CONVERT(DATE, Admission_Date, 103) AS Adm_Date,
+           COALESCE(TRY_CONVERT(DATE, NULLIF(Discharge_Date,''), 103),
+                    TRY_CONVERT(DATE, NULLIF(Discharge_Date,'')))  AS Dis_Date
+    FROM   dbo.InpatientAdmissions
+),
+Occupancy AS (
+    SELECT w.Census_Date, s.Ward_Code, COUNT(*) AS Concurrent_Patients
+    FROM   Weeks w
+    JOIN   Spells s
+      ON   s.Adm_Date <= w.Census_Date
+     AND  (s.Dis_Date IS NULL OR s.Dis_Date > w.Census_Date)
+    GROUP BY w.Census_Date, s.Ward_Code
+)
+SELECT  Ward_Code,
+        SUM(CASE WHEN Concurrent_Patients > 10 THEN 1 ELSE 0 END) AS Weeks_Over_10,
+        (SELECT COUNT(*) FROM Weeks)                               AS Weeks_Measured,
+        MAX(Concurrent_Patients)                                   AS Peak_Patients,
+        CAST(AVG(1.0 * Concurrent_Patients) AS DECIMAL(5,1))       AS Avg_Patients
+FROM    Occupancy
+GROUP BY Ward_Code
+ORDER BY Weeks_Over_10 DESC, Peak_Patients DESC
+OPTION (MAXRECURSION 0);
+
+3. Key finding
+Measured at 25 Sunday census points (06/10/2024 to 23/03/2025). Three wards regularly exceed 10 concurrent patients:
+  W-01 Medical       over 10 in 11 of 25 weeks; peak 18 (01/12/2024); average 10.7
+  W-03 Orthopaedics  over 10 in 10 of 25 weeks; peak 18 (16/02/2025); average 10.3
+  W-02 Surgical      over 10 in  9 of 25 weeks; peak 15; average 9.8
+W-04, W-05 and W-06 never exceed 10 (peaks 7, 8 and 8). Decommissioned W-08 still shows 1 patient in 2 weeks. W-07 has no patient present on any census date.
+
+Caveats: the 31 spells with no discharge date count as present every week after admission, which inflates later weeks. Early October is understated because admissions before 01/10/2024 are not in the extract.
+
+QUERY 5 - DEPARTMENTAL WAITING TIMES
+
+1. Business question
+For each specialty, average, median and maximum waiting days for open RTT pathways, highest average first.
+
+2. SQL query (T-SQL)
+/* QUERY 5 - DEPARTMENTAL WAITING TIMES (open RTT pathways)
+   SQL Server has no MEDIAN(). PERCENTILE_CONT(0.5) is a window function, so it is worked
+   out per row in a CTE and then collapsed with GROUP BY.
+*/
+WITH OpenWaits AS (
+    SELECT  Specialty_Code,
+            TRY_CAST(Waiting_Days AS INT) AS WaitDays,
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY TRY_CAST(Waiting_Days AS INT))
+                OVER (PARTITION BY Specialty_Code) AS Median_Days
+    FROM    dbo.OutpatientAppointments
+    WHERE   RTT_Status = 'OPEN'
+      AND   TRY_CAST(Waiting_Days AS INT) >= 0
+)
+SELECT  Specialty_Code,
+        COUNT(*)                                     AS Open_Pathways,
+        CAST(AVG(1.0 * WaitDays) AS DECIMAL(6,2))     AS Avg_Waiting_Days,
+        MAX(Median_Days)                             AS Median_Waiting_Days,
+        MAX(WaitDays)                                AS Max_Waiting_Days
+FROM    OpenWaits
+GROUP BY Specialty_Code
+ORDER BY Avg_Waiting_Days DESC;
+
+3. Key finding
+130 open pathways (APT-100200 excluded).
+  Specialty  Open  Average  Median  Max
+  OR          19   253.21   268.0   423
+  RHE          6   190.00   184.5   355
+  OPH         12   179.25   184.0   246
+  GM           7   172.57   245.0   312
+  RS           9   171.00   168.0   190
+  URO         16   161.56   183.5   235
+  GS           5   158.00   178.0   184
+  CS          10   156.10   189.5   203
+  GYN          9   151.11   144.0   230
+  EM          37    23.38    18.0    99
+The 9 non-EM specialties all have an average of 151 days or more (over 21 weeks). Orthopaedics' median of 268 days is 38.3 weeks, and its longest open wait is 423 days (60.4 weeks).
+
+QUERY 6 - DUPLICATE PATIENT RECORDS (PRIORITY)
+
+1. Business question
+Which NHS Numbers appear more than once in OutpatientAppointments, and is their demographic data consistent?
+
+2. SQL query (T-SQL)
+/* QUERY 6 - DUPLICATE PATIENT RECORDS (NHS Number appearing more than once)
+   Patients with several appointments are normal. The real problem is one NHS Number
+   attached to different surnames or dates of birth, which points to a wrong or reused
+   number.
+*/
+WITH Repeats AS (
+    SELECT  NHS_Number,
+            COUNT(*)                        AS Appointment_Count,
+            COUNT(DISTINCT Patient_Surname) AS Distinct_Surnames,
+            COUNT(DISTINCT Patient_DOB)     AS Distinct_DOBs
+    FROM    dbo.OutpatientAppointments
+    WHERE   NULLIF(NHS_Number, '') IS NOT NULL
+    GROUP BY NHS_Number
+    HAVING  COUNT(*) > 1
+),
+Names AS (                                         -- list of surnames used per NHS Number
+    SELECT  NHS_Number, STRING_AGG(Patient_Surname, ' / ') AS Surnames
+    FROM   (SELECT DISTINCT NHS_Number, Patient_Surname FROM dbo.OutpatientAppointments) d
+    GROUP BY NHS_Number
+)
+SELECT  r.NHS_Number,
+        n.Surnames,
+        r.Appointment_Count,
+        CASE WHEN r.Distinct_Surnames = 1 AND r.Distinct_DOBs = 1
+             THEN 'Consistent'
+             ELSE 'INCONSISTENT - ' + CAST(r.Distinct_Surnames AS VARCHAR(3)) + ' surname(s), '
+                                    + CAST(r.Distinct_DOBs AS VARCHAR(3)) + ' DOB(s)' END AS Demographic_Check
+FROM    Repeats r
+JOIN    Names   n ON n.NHS_Number = r.NHS_Number
+ORDER BY CASE WHEN r.Distinct_Surnames = 1 AND r.Distinct_DOBs = 1 THEN 1 ELSE 0 END,  -- problems first
+         r.Appointment_Count DESC;
+
+3. Key finding
+131 NHS Numbers appear more than once, covering 324 of the 577 appointments with an NHS Number: 81 appear twice, 41 three times, 6 four times and 3 five times.
+  - 115 are consistent (same surname and DOB every time). These are genuine repeat attenders.
+  - 16 are INCONSISTENT, covering 52 appointments, with different surnames and/or dates of birth under one NHS Number. The worst is 6374829105: 5 appointments under NICHOLS, FLORES and NELSON with 3 different DOBs.
+These 16 numbers must be traced through PDS before any patient-level reporting. A further 3 appointments have no NHS Number.
+
+QUERY 7 - LOST REFERRALS
+
+1. Business question
+Which patients have an open RTT pathway but no inpatient admission or ED attendance in the same period?
+
+2. SQL query (T-SQL)
+/* QUERY 7 - LOST REFERRALS
+   Open RTT pathways whose NHS Number never appears in InpatientAdmissions or
+   EDAttendances. "Same period" is the whole extract window (Oct 2024 - Mar 2025).
+*/
+SELECT  o.Specialty_Code,
+        COUNT(*)                     AS Open_Pathways_No_Onward_Activity,
+        COUNT(DISTINCT o.NHS_Number) AS Patients
+FROM    dbo.OutpatientAppointments o
+WHERE   o.RTT_Status = 'OPEN'
+  AND   NULLIF(o.NHS_Number, '') IS NOT NULL
+  AND   NOT EXISTS (SELECT 1 FROM dbo.InpatientAdmissions i WHERE i.NHS_Number = o.NHS_Number)
+  AND   NOT EXISTS (SELECT 1 FROM dbo.EDAttendances      e WHERE e.NHS_Number = o.NHS_Number)
+GROUP BY o.Specialty_Code
+ORDER BY Open_Pathways_No_Onward_Activity DESC;
+
+3. Key finding
+All 129 open pathways that have an NHS Number (84 patients) show no inpatient or ED activity: 100%. By specialty: EM 37, OR 18, URO 16, OPH 12, CS 10, RS 9, GYN 9, GM 7, RHE 6, GS 5. The other 2 open pathways have no NHS Number.
+
+This is not 129 lost referrals. Not one NHS Number is shared between OutpatientAppointments and the other two tables (Module A, DQ-004), so the join cannot match anything. Lost referrals cannot be identified until PAS, EHR and EDIS share a common patient key.
+
+QUERY 8 - REVENUE LEAKAGE, HRG (PRIORITY)
+
+1. Business question
+How many inpatient episodes have a blank HRG_Code, by specialty, and what is the revenue at risk at GBP 1,850 per episode?
+
+2. SQL query (T-SQL)
+/* QUERY 8 - REVENUE LEAKAGE (blank HRG_Code)
+   An episode without an HRG code is not paid. GBP 1,850 per episode (Company Brief).
+*/
+DECLARE @TariffPerEpisode MONEY = 1850;
+
+WITH Episodes AS (SELECT DISTINCT * FROM dbo.InpatientAdmissions)   -- remove exact duplicates
+SELECT  Specialty_Code,
+        COUNT(*)                                                       AS Total_Episodes,
+        SUM(CASE WHEN NULLIF(HRG_Code,'') IS NULL THEN 1 ELSE 0 END)    AS Blank_HRG,
+        CAST(100.0 * SUM(CASE WHEN NULLIF(HRG_Code,'') IS NULL THEN 1 ELSE 0 END)
+             / COUNT(*) AS DECIMAL(5,2))                               AS Blank_Pct,
+        SUM(CASE WHEN NULLIF(HRG_Code,'') IS NULL THEN 1 ELSE 0 END)
+             * @TariffPerEpisode                                       AS Revenue_At_Risk_GBP
+FROM    Episodes
+GROUP BY ROLLUP (Specialty_Code)               -- final NULL row = Trust total
+ORDER BY GROUPING(Specialty_Code), Blank_HRG DESC;
+
+3. Key finding
+28 of 1,204 episodes (2.33%; 2 exact duplicates removed) have no HRG code. Revenue at risk: GBP 51,800. HRG completeness is 97.67%, below the 98% standard.
+  EM   8 blank / 128 (6.25%)  GBP 14,800
+  CS   4 / 126 (3.17%)        GBP  7,400
+  OPH  4 / 118 (3.39%)        GBP  7,400
+  GS, GYN, OR, RS, URO  2 each  GBP 3,700 each (GBP 18,500 together)
+  GM   1 / 107 (0.93%)        GBP  1,850
+  RHE  1 / 143 (0.70%)        GBP  1,850
+Emergency Medicine alone is 28.57% of the leakage (GBP 14,800). The extract covers 6 months, so this is about GBP 8,633 a month, not the GBP 51,800 a month in the Company Brief.
+
+QUERY 9 - SERVICES BEATING THE 8% DNA TARGET
+
+1. Business question
+Which specialties have a DNA rate below the 8% Trust target, and what can others learn?
+
+2. SQL query (T-SQL)
+/* QUERY 9 - SERVICES BEATING THE 8% DNA TARGET
+   DNA rate = DNA / (ATT + DNA). Cancellations and refusals are excluded because the
+   patient was never expected to attend. Returns only specialties below 8%.
+*/
+WITH SpecialtyDNA AS (
+    SELECT  Specialty_Code,
+            SUM(CASE WHEN Attendance_Status = 'ATT' THEN 1 ELSE 0 END) AS Attended,
+            SUM(CASE WHEN Attendance_Status = 'DNA' THEN 1 ELSE 0 END) AS DNA
+    FROM    dbo.OutpatientAppointments
+    WHERE   Attendance_Status COLLATE Latin1_General_CS_AS IN ('ATT','DNA')
+    GROUP BY Specialty_Code
+)
+SELECT  Specialty_Code, Attended, DNA,
+        CAST(100.0 * DNA / (Attended + DNA) AS DECIMAL(5,2)) AS DNA_Rate_Pct
+FROM    SpecialtyDNA
+WHERE   100.0 * DNA / (Attended + DNA) < 8.0
+ORDER BY DNA_Rate_Pct ASC;
+
+3. Key finding
+4 of 10 specialties are below 8%:
+  EM   0 / 44 = 0.00%
+  GM   4 / 56 = 7.14%
+  GS   4 / 53 = 7.55%
+  RHE  5 / 64 = 7.81%
+Lessons: GM, GS and RHE beat the target even though 50, 42 and 56 of their appointments are GP-referred, the group with the most DNAs Trust-wide. Their booking and reminder practice is the one to copy for Orthopaedics (38.64%) and Urology (20.75%). Treat EM's 0.00% with caution: 37 of its 64 appointments come from ED, and its consultant cancels 29.69% of appointments (Query 2). Hospital cancellations may be removing slots before a DNA can happen.
+
+QUERY 10 - READMISSION PATTERN
+
+1. Business question
+Among episodes flagged Readmission_Flag = Y, which admission types and specialties have the most readmissions? (CTE)
+
+2. SQL query (T-SQL)
+/* QUERY 10 - READMISSION PATTERN (Readmission_Flag = 'Y')
+   The CTE standardises Admission_Type ('Elective' -> ELEC, 'emergency' -> EMER) before
+   counting, then counts by type, by specialty and by both.
+*/
+WITH Readmissions AS (
+    SELECT  CASE UPPER(Admission_Type)
+                 WHEN 'ELECTIVE'  THEN 'ELEC'
+                 WHEN 'EMERGENCY' THEN 'EMER'
+                 ELSE UPPER(Admission_Type) END AS Adm_Type,
+            Specialty_Code
+    FROM   (SELECT DISTINCT * FROM dbo.InpatientAdmissions) i
+    WHERE   Readmission_Flag = 'Y'
+)
+SELECT  Adm_Type, Specialty_Code, COUNT(*) AS Readmissions
+FROM    Readmissions
+GROUP BY GROUPING SETS ((Adm_Type), (Specialty_Code), (Adm_Type, Specialty_Code))
+ORDER BY CASE WHEN Adm_Type IS NOT NULL AND Specialty_Code IS NULL THEN 1
+              WHEN Adm_Type IS NULL THEN 2 ELSE 3 END,
+         Readmissions DESC;
+
+3. Key finding
+104 episodes are flagged as readmissions.
+By admission type: EMER 55 (52.88%), ELEC 43 (41.35%), TRANSFER 6 (5.77%).
+By specialty: OR 15, URO 14, RHE 13, GYN 11, EM 11, GM 10, GS 10, RS 7, CS 7, OPH 6.
+Top combinations: EMER-GS 9, EMER-URO 9, ELEC-OR 8, EMER-EM 7, EMER-GYN 7, ELEC-RHE 7.
+Data warning: a 30-day readmission should be an emergency admission, yet 43 flagged episodes are elective. The flags are unreliable; Module C found only 17 of 103 existing Y flags confirmed by the date logic.
+
+QUERY 11 - AGENCY SPEND BY WARD (PRIORITY)
+
+1. Business question
+Which wards have the most confirmed agency shifts, and what is the estimated cost at GBP 385 per shift (blank flags and ST-99 test records excluded)?
+
+2. SQL query (T-SQL)
+/* QUERY 11 - AGENCY SPEND BY WARD
+   Confirmed agency shifts only: Agency_Flag = 'Y'. Blank flags are excluded, and so are
+   ST-99 training-environment test records. Rows with a blank Staff_ID are kept: they are
+   not test records, and NOT LIKE on a NULL would silently drop them. GBP 385 per shift.
+*/
+DECLARE @CostPerAgencyShift MONEY = 385;
+
+SELECT  Ward_Code,
+        COUNT(*)                        AS Confirmed_Agency_Shifts,
+        COUNT(*) * @CostPerAgencyShift  AS Estimated_Cost_GBP
+FROM    dbo.WorkforceStaffing
+WHERE   Agency_Flag = 'Y'
+  AND  (NULLIF(Staff_ID,'') IS NULL OR Staff_ID NOT LIKE 'ST-99%')
+GROUP BY ROLLUP (Ward_Code)
+ORDER BY GROUPING(Ward_Code), Confirmed_Agency_Shifts DESC;
+
+3. Key finding
+252 confirmed agency shifts, costing GBP 97,020 over 8 weeks (06/01/2025 to 02/03/2025).
+  W-05 Respiratory   42 shifts  GBP 16,170
+  W-06 Gynaecology   38 shifts  GBP 14,630
+  W-03 Orthopaedics  36 shifts  GBP 13,860
+  W-04 Cardiology    36 shifts  GBP 13,860
+  W-07 Oncology      34 shifts  GBP 13,090
+  W-01 Medical       33 shifts  GBP 12,705
+  W-02 Surgical      32 shifts  GBP 12,320
+  W-08 (closed)       1 shift   GBP    385
+Excluded: 15 blank-flag shifts and 4 agency shifts from ST-99 test records. W-05 has the most agency use: 42 of its 223 flagged shifts (18.83%). The 1 agency shift booked to decommissioned W-08 needs correcting.
+
+QUERY 12 - THEATRE CANCELLATION PATTERN
+
+1. Business question
+Is there a day-of-week or specialty pattern in theatre cancellations, and which week and specialty combinations have the most?
+
+2. SQL query (T-SQL)
+/* QUERY 12 - THEATRE CANCELLATION PATTERN
+   12a: day-of-week check on Week_Ending. The table holds one row per theatre per week, so
+        this only shows which day each week is stamped with.
+   12b: cancellations by specialty, normalised per theatre-week.
+   12c: the week x specialty combinations with the most cancellations.
+   Blank cancellation counts are treated as 0 (30 Trust and 23 patient blanks), so totals
+   are a minimum.
+*/
+-- 12a
+SELECT  DATENAME(WEEKDAY, TRY_CONVERT(DATE, Week_Ending, 103)) AS Week_Ending_Day,
+        COUNT(*)                                               AS Theatre_Weeks,
+        SUM(ISNULL(TRY_CAST(Cancellations_Trust AS INT),0)
+          + ISNULL(TRY_CAST(Cancellations_Patient AS INT),0))  AS Cancellations
+FROM    dbo.TheatreUtilisation
+GROUP BY DATENAME(WEEKDAY, TRY_CONVERT(DATE, Week_Ending, 103));
+
+-- 12b
+SELECT  Specialty_Code,
+        COUNT(*)                                               AS Theatre_Weeks,
+        SUM(ISNULL(TRY_CAST(Cancellations_Trust AS INT),0))    AS Trust_Cancellations,
+        SUM(ISNULL(TRY_CAST(Cancellations_Patient AS INT),0))  AS Patient_Cancellations,
+        SUM(ISNULL(TRY_CAST(Cancellations_Trust AS INT),0)
+          + ISNULL(TRY_CAST(Cancellations_Patient AS INT),0))  AS Total_Cancellations,
+        CAST(1.0 * SUM(ISNULL(TRY_CAST(Cancellations_Trust AS INT),0)
+                     + ISNULL(TRY_CAST(Cancellations_Patient AS INT),0))
+             / COUNT(*) AS DECIMAL(5,2))                       AS Cancellations_Per_Theatre_Week
+FROM    dbo.TheatreUtilisation
+GROUP BY Specialty_Code
+ORDER BY Cancellations_Per_Theatre_Week DESC;
+
+-- 12c
+SELECT TOP (10)
+        Week_Ending,
+        Specialty_Code,
+        COUNT(*)                                               AS Theatres,
+        SUM(ISNULL(TRY_CAST(Cancellations_Trust AS INT),0)
+          + ISNULL(TRY_CAST(Cancellations_Patient AS INT),0))  AS Total_Cancellations
+FROM    dbo.TheatreUtilisation
+GROUP BY Week_Ending, Specialty_Code
+ORDER BY Total_Cancellations DESC, TRY_CONVERT(DATE, Week_Ending, 103);
+
+3. Key finding
+642 cancellations across 208 theatre-weeks: 359 by the Trust and 283 by patients. This is a minimum, because 30 Trust and 23 patient values are blank.
+Day of week: no pattern can be measured. The table is weekly, so every row is stamped with its week-ending day: 206 Sunday rows (634 cancellations) and 2 Monday rows (8), the 2 Mondays being Module A date errors.
+By specialty, per theatre-week: URO 3.56 (96 over 27), GS 3.51 (158 over 45), OR 3.19 (102 over 32), EM 3.00, GYN 2.79, RHE 2.70, CS 2.68, OPH lowest at 2.42. (GM shows 5.00, but that is only 2 theatre-weeks of recoded GEN rows.)
+Worst week x specialty: 16/02/2025 GS 11 (3 theatres), 16/03/2025 OR 11 (2 theatres), 18/08/2024 URO 10, 30/03/2025 OR 10. March 2025 is the worst month (77).

@@ -1,0 +1,154 @@
+BRONINGS - PHASE 6 DAX MEASURES (Power BI service, web model editor)
+
+How to add a measure: open the semantic model > select the home table in the Data pane > New measure > paste the formula > press Enter (or the tick).
+Paste each formula exactly. The name is the text before the "=" sign.
+"Home table" is where to create the measure, so it is easy to find.
+"Expected" is the value it must show on a card with no filters. If yours differs, check the data types (step 4.3 of the guide).
+
+
+PART A. THE 12 REQUIRED MEASURES (names exactly as specified)
+
+1. Cumulative Admissions          Home table: InpatientAdmissions          Expected: 1200 (at the last date)
+Cumulative Admissions = CALCULATE(COUNT(InpatientAdmissions[Episode_ID]), FILTER(ALL(InpatientAdmissions[Admission_Date]), InpatientAdmissions[Admission_Date] <= MAX(InpatientAdmissions[Admission_Date])))
+Use with: line chart, X axis = InpatientAdmissions[Admission_Date] (not DimDate).
+
+2. Rolling 12Wk Avg Wait          Home table: OutpatientAppointments      Expected: varies by date
+Rolling 12Wk Avg Wait = AVERAGEX(DATESINPERIOD(OutpatientAppointments[Appointment_Date], LASTDATE(OutpatientAppointments[Appointment_Date]), -84, DAY), CALCULATE(AVERAGE(OutpatientAppointments[Waiting_Days])))
+Use with: line chart, X axis = OutpatientAppointments[Appointment_Date]. Waiting_Days is already validated (negatives removed).
+Note: outpatient data covers only 06/01/2025 to 21/03/2025 (11 weeks), so the 12-week window covers the whole period.
+
+3. YTD Variance                   Home table: FinanceMonthly              Expected: 50,173.20 (at Mar 2025)
+First create the two supporting measures:
+Agency Actual YTD £ =
+VAR m = MAX(FinanceMonthly[Month_Start])
+VAR fyStart = DATE(YEAR(m) - IF(MONTH(m) < 4, 1, 0), 4, 1)
+RETURN CALCULATE(SUM(FinanceMonthly[Agency_Actual_GBP]), FILTER(ALL(FinanceMonthly), FinanceMonthly[Month_Start] >= fyStart && FinanceMonthly[Month_Start] <= m))
+
+Agency Budget YTD £ =
+VAR m = MAX(FinanceMonthly[Month_Start])
+VAR fyStart = DATE(YEAR(m) - IF(MONTH(m) < 4, 1, 0), 4, 1)
+RETURN CALCULATE(SUM(FinanceMonthly[Agency_Budget_GBP]), FILTER(ALL(FinanceMonthly), FinanceMonthly[Month_Start] >= fyStart && FinanceMonthly[Month_Start] <= m))
+
+Then:
+YTD Variance = [Agency Actual YTD £] - [Agency Budget YTD £]
+Positive = overspend. Actual YTD 97,020.00; Budget YTD 46,846.80. The budget is a PLACEHOLDER (cost at the 8% target) until Finance supplies a real budget; label it on the page.
+
+4. Occupancy %                    Home table: InpatientAdmissions          Expected: 8.16
+Occupancy % = DIVIDE(COUNTROWS(FILTER(InpatientAdmissions, ISBLANK(InpatientAdmissions[Discharge_Date]))), 380) * 100
+This counts patients with no discharge date (31 / 380 beds). It ignores dates, so it suits a card only; for the trend chart use "Occupancy % (Census)" in Part B.
+
+5. DNA Rate %                     Home table: OutpatientAppointments      Expected: 13.13
+DNA Rate % = DIVIDE(COUNTROWS(FILTER(OutpatientAppointments, OutpatientAppointments[Attendance_Status] = "DNA")), COUNTROWS(FILTER(OutpatientAppointments, OutpatientAppointments[Attendance_Status] IN {"ATT","DNA","CAN","REF"}))) * 100
+Note: this keeps CAN and REF in the denominator, which the Phase 5 framework (KPI 03) rejected. "DNA Rate % (KPI 03)" in Part B gives the signed-off figure, 14.07%.
+
+6. Readmission Rate %             Home table: InpatientAdmissions          Expected: 9.50
+Readmission Rate % = DIVIDE(COUNTROWS(FILTER(InpatientAdmissions, InpatientAdmissions[Readmission_Flag] = "Y")), COUNTROWS(FILTER(InpatientAdmissions, InpatientAdmissions[Readmission_Flag] IN {"Y","N"}))) * 100
+
+7. Theatre Util %                 Home table: TheatreUtilisation           Expected: 70.75
+Theatre Util % = DIVIDE(SUM(TheatreUtilisation[Sessions_Used]), SUM(TheatreUtilisation[Sessions_Available])) * 100
+
+8. RTT Compliance %               Home table: OutpatientAppointments      Expected: 41.22
+RTT Compliance % = DIVIDE(COUNTROWS(FILTER(OutpatientAppointments, OutpatientAppointments[RTT_Status] = "OPEN" && OutpatientAppointments[RTT_Weeks] <= 18)), COUNTROWS(FILTER(OutpatientAppointments, OutpatientAppointments[RTT_Status] = "OPEN"))) * 100
+(54 of 131. The SQL report's 41.54% excluded APT-100200, which has no RTT_Weeks.)
+
+9. ALOS                           Home table: InpatientAdmissions          Expected: 3.88
+ALOS = AVERAGEX(FILTER(InpatientAdmissions, InpatientAdmissions[Length_of_Stay] >= 0), InpatientAdmissions[Length_of_Stay])
+Length_of_Stay was recalculated from the dates in Snowflake, so the 6 negative exported values are already fixed.
+
+10. RAG Status                    Home table: OutpatientAppointments      Expected: Red
+RAG Status = IF([RTT Compliance %] >= 92, "Green", IF([RTT Compliance %] >= 80, "Amber", "Red"))
+
+11. Agency Spend %                Home table: WorkforceStaffing            Expected: 16.57
+Agency Spend % = DIVIDE(COUNTROWS(FILTER(WorkforceStaffing, WorkforceStaffing[Agency_Flag] = "Y")), COUNTROWS(FILTER(WorkforceStaffing, WorkforceStaffing[Agency_Flag] IN {"Y","N"}))) * 100
+The ST-99 test records were removed in Snowflake, and blank flags are excluded by the IN filter (252 / 1,521).
+
+12. Waiting List Forecast (12 weeks)    Not a DAX measure
+Create the base measure below, put it on a line chart with X axis = OutpatientAppointments[Week_Ending], then Analytics pane > Forecast > Forecast length 12 > Units: Points > Apply.
+Waiting List = COUNTROWS(FILTER(OutpatientAppointments, OutpatientAppointments[RTT_Status] = "OPEN"))
+Expected weekly values: 18, 18, 17, 18, 15, 7, 15, 4, 6, 7, 6 (weeks ending 12/01/2025 to 23/03/2025).
+
+
+PART B. SUPPORTING MEASURES (needed by the 6 pages)
+
+Occupancy % (Census)              Home table: InpatientAdmissions   (use with X axis = DimDate[Week_Ending])
+Occupancy % (Census) =
+VAR d = MAX(DimDate[Week_Ending])
+RETURN DIVIDE(COUNTROWS(FILTER(ALL(InpatientAdmissions), InpatientAdmissions[Admission_Date] <= d && (ISBLANK(InpatientAdmissions[Discharge_Date]) || InpatientAdmissions[Discharge_Date] > d))), 380) * 100
+Expected: 5.53 (06/10/2024) rising to a peak of 14.74 (16/02/2025). The extract is a sample of admissions, not the full 380-bed hospital, so values sit far below the 85% / 92% lines. Say so in the chart subtitle.
+
+DNA Rate % (KPI 03)               Home table: OutpatientAppointments      Expected: 14.07
+DNA Rate % (KPI 03) = DIVIDE(COUNTROWS(FILTER(OutpatientAppointments, OutpatientAppointments[Attendance_Status] = "DNA")), COUNTROWS(FILTER(OutpatientAppointments, OutpatientAppointments[Attendance_Status] IN {"ATT","DNA"}))) * 100
+
+4-Hour Compliance %               Home table: EDAttendances                Expected: 80.10
+4-Hour Compliance % = DIVIDE(COUNTROWS(FILTER(EDAttendances, NOT ISBLANK(EDAttendances[Total_ED_Time_Minutes]) && EDAttendances[Total_ED_Time_Minutes] <= 240)), COUNTROWS(EDAttendances)) * 100
+(KPI 01 definition: all attendances in the denominator; the 35 with no departure time count as non-compliant.)
+
+ED Attendances                    Home table: EDAttendances                Expected: 960
+ED Attendances = COUNTROWS(EDAttendances)
+
+LWBS Rate %                       Home table: EDAttendances                Expected: 2.40
+LWBS Rate % = DIVIDE(COUNTROWS(FILTER(EDAttendances, EDAttendances[Departure_Code] = "LWBS")), COUNTROWS(EDAttendances)) * 100
+
+HRG Completeness %                Home table: InpatientAdmissions          Expected: 97.67
+HRG Completeness % = DIVIDE(COUNTROWS(FILTER(InpatientAdmissions, NOT ISBLANK(InpatientAdmissions[HRG_Code]))), COUNTROWS(InpatientAdmissions)) * 100
+
+HRG Revenue at Risk £             Home table: InpatientAdmissions          Expected: 51,800
+HRG Revenue at Risk £ = COUNTROWS(FILTER(InpatientAdmissions, ISBLANK(InpatientAdmissions[HRG_Code]))) * 1850
+
+Agency Shifts                     Home table: WorkforceStaffing            Expected: 252
+Agency Shifts = COUNTROWS(FILTER(WorkforceStaffing, WorkforceStaffing[Agency_Flag] = "Y"))
+
+Agency Cost £                     Home table: WorkforceStaffing            Expected: 97,020
+Agency Cost £ = [Agency Shifts] * 385
+
+Overtime Hours                    Home table: WorkforceStaffing
+Overtime Hours = SUM(WorkforceStaffing[Overtime_Hours])
+
+Theatre Unused Sessions           Home table: TheatreUtilisation           Expected: 636
+Theatre Unused Sessions = SUM(TheatreUtilisation[Sessions_Available]) - SUM(TheatreUtilisation[Sessions_Used])
+
+Open RTT Breaches                 Home table: OutpatientAppointments      Expected: 76
+Open RTT Breaches = COUNTROWS(FILTER(OutpatientAppointments, OutpatientAppointments[RTT_Status] = "OPEN" && OutpatientAppointments[Waiting_Days] > 126))
+
+
+PART C. RAG CALCULATED COLUMNS (Executive Summary scorecard)
+
+Create these as New column (not New measure) on the KPI_Scorecard table, in this order.
+
+Actual =
+SWITCH(KPI_Scorecard[KPI_Code],
+    "4HT",     [4-Hour Compliance %],
+    "LWBS",    [LWBS Rate %],
+    "DNA",     [DNA Rate % (KPI 03)],
+    "RTT",     [RTT Compliance %],
+    "THEATRE", [Theatre Util %],
+    "ALOS",    [ALOS],
+    "READM",   [Readmission Rate %],
+    "HRG",     [HRG Completeness %],
+    "AGENCY",  [Agency Spend %],
+    BLANK())
+
+RAG =
+VAR a = KPI_Scorecard[Actual]
+RETURN
+IF(ISBLANK(a), "Grey",
+    IF(KPI_Scorecard[Higher_Is_Better],
+        IF(a >= KPI_Scorecard[Target], "Green", IF(a >= KPI_Scorecard[Amber_Threshold], "Amber", "Red")),
+        IF(a < KPI_Scorecard[Target], "Green", IF(a <= KPI_Scorecard[Amber_Threshold], "Amber", "Red"))))
+
+RAG Colour = SWITCH(KPI_Scorecard[RAG], "Green", "#009639", "Amber", "#FFB81C", "Red", "#DA291C", "#768692")
+
+Actual (display) = FORMAT(KPI_Scorecard[Actual], IF(KPI_Scorecard[Unit] = "days", "0.00", "0.00")) & IF(KPI_Scorecard[Unit] = "%", "%", " days")
+
+Expected scorecard:
+  ED 4-hour compliance          80.10%     Amber
+  ED left without being seen     2.40%     Green
+  Outpatient DNA rate           14.07%     Red
+  RTT 18-week compliance        41.22%     Red
+  Theatre utilisation           70.75%     Red
+  Average length of stay         3.88 days Green
+  30-day readmission rate        9.50%     Green
+  HRG coding completeness       97.67%     Amber
+  Agency share of shifts        16.57%     Red
+
+Calculated columns are worked out at refresh, so the scorecard shows whole-period values and does not react to slicers. That is intended for a Board summary.

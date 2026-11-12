@@ -1,0 +1,771 @@
+====================================================================================================
+BRONINGS UNIVERSITY HOSPITAL GROUP
+DATA QUALITY ISSUE LOG - MODULE A (TASKS 1-8)
+====================================================================================================
+Prepared by : Advanced Healthcare Data Analyst
+Date logged : 28/01/2025
+Source data : Weekly CSV exports - Outpatient_Appointments (PAS, 580 rows), Inpatient_Admissions
+              (EHR, 1,206 rows), ED_Attendances (EDIS, 969 rows), Theatre_Utilisation (TMS, 208 rows),
+              Workforce_Staffing (WRS, 1,560 rows)
+
+SEVERITY KEY
+  Critical - blocks or corrupts statutory reporting (SUS, A&E, RTT, Cancelled Operations)
+  Major    - distorts a KPI
+  Minor    - cosmetic
+
+ISSUES LOGGED: 49  (Critical 10 | Major 29 | Minor 9 | Checked, none found 1)
+
+----------------------------------------------------------------------------------------------------
+KEY FIGURES BY TASK
+----------------------------------------------------------------------------------------------------
+Task 1  Attendance_Status non-standard values : 2  ('attended' APT-100154; 'N/A' APT-100199)
+        Valid codes: ATT 463 | DNA 76 | CAN 33 | REF 6
+Task 2  Blank NHS_Number : OP 3 | IP 20 | ED 121
+        Wrong length (not 10 digits) in OP : 0  (26 OP numbers start with 0 - at risk of 9-digit truncation in Excel)
+        OP rows not found in Inpatient_Admissions : 577 of 577 non-blank (384 of 384 distinct patients; 0% overlap)
+Task 3  Blank HRG_Code : 28 of 1206 (2.32%); completeness 97.68% vs 98% target
+        Revenue at risk @ GBP 1,850/episode : GBP 51,800
+        Extract spans 6 months -> annualised GBP 103,600 (Brief assumes 28/month = GBP 621,600/yr)
+Task 4  Date/time format errors : IP Discharge_Date 3 | ED Arrival_Time 17 | Theatre Week_Ending 2 | OP Appointment_Time 1
+Task 5  Duplicate Appointment_IDs (OP) : 0 exact, 0 near-duplicates
+        IP Episode_ID : 6 IDs / 12 rows (2 exact copies, 4 near-duplicates differing in Ward_Code)
+        ED Attendance_ID : 9 IDs / 18 rows (all near-duplicates differing in Chief_Complaint)
+Task 6  Negative Waiting_Days : 1 | > 104 weeks : 0 | text 'ATT' instead of number : 28
+        RTT_Weeks = Waiting_Days / 7 mismatches : 0 | Validated > 52 weeks : 5 | max wait 423 days
+        Waiting_Days_Validated: negatives excluded; text rows derived as RTT_Weeks x 7 and flagged
+Task 7  GEN specialty code (replaced with GM):
+        Sheet                     Column                  Before   After
+        Outpatient_Appointments   Specialty_Code               3       0
+        Inpatient_Admissions      Specialty_Code              10       0
+        ED_Attendances            Specialty_Referred           0       0
+        Theatre_Utilisation       Specialty_Code               2       0
+        Workforce_Staffing        Specialty_Code               9       0
+        TOTAL                                                 24       0
+        Verified: 24 changes recorded in audit trail (sheet, row, record key, old/new value, date)
+Task 8  Blank Agency_Flag : 15 of 1560 | Agency = Y : 256  @ GBP 385/shift
+        Best case GBP 98,560 | Worst case GBP 104,335 | Range GBP 5,775
+        Excluding 24 ST-99 test records: best GBP 97,020 | worst GBP 102,795
+
+----------------------------------------------------------------------------------------------------
+ISSUE LOG
+----------------------------------------------------------------------------------------------------
+
+DQ-001  [MAJOR]  Task 1 - raised by Sarah Okafor
+  1. Sheet / dataset:     Outpatient_Appointments (PAS)
+  2. Column:              Attendance_Status
+  3. Issue type:          Non-standard value
+  4. Affected rows:       2 (0.3% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Recode APT-100154 to ATT. Investigate APT-100199 (looks like a test
+                          record: GEN, CL-DEP, postcode XX1 1XX, no consultant) and remove if
+                          confirmed. Add a PAS drop-down/validation list.
+     Detail:              2 values outside ATT/DNA/CAN/REF: 'attended' (APT-100154 - lower-case full
+                          word) and 'N/A' (APT-100199). Valid: ATT 463, DNA 76, CAN 33, REF 6.
+     KPI / return:        DNA rate (KPI 03) denominator
+     Owner:               Sarah Okafor / PAS team
+     Test used:           Case-sensitive EXACT() against the 4 valid codes; Status_Check column
+     Status:              Open - flagged in Status_Check
+
+DQ-002  [CRITICAL]  Task 2 - raised by Daniel Walsh
+  1. Sheet / dataset:     Outpatient_Appointments (PAS)
+  2. Column:              NHS_Number
+  3. Issue type:          Blank
+  4. Affected rows:       3 (0.5% of rows)
+  5. Severity:            Critical
+  6. Recommended action:  Trace via PDS (Spine) and back-fill before month-end submission.
+     Detail:              APT-100153, APT-100164, APT-100175.
+     KPI / return:        RTT return; patient linkage
+     Owner:               PAS team
+     Test used:           COUNTBLANK
+     Status:              Open
+
+DQ-003  [MAJOR]  Task 2 - raised by Daniel Walsh
+  1. Sheet / dataset:     Outpatient_Appointments (PAS)
+  2. Column:              NHS_Number
+  3. Issue type:          Format error
+  4. Affected rows:       0 (0.0% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Keep NHS_Number as Text on import (Power Query type = Text). Daniel:
+                          change export cast from INT to VARCHAR(10).
+     Detail:              0 rows have the wrong length in the CSV - the 9-digit truncation (Pipeline
+                          Issue 1) did not occur in this export. BUT 26 OP / 95 IP / 67 ED numbers
+                          start with 0 and will become 9 digits if opened in Excel as numbers.
+     KPI / return:        All patient-level joins
+     Owner:               Daniel Walsh
+     Test used:           LEN()<>10; LEFT()="0"
+     Status:              Open - preventive
+
+DQ-004  [MAJOR]  Task 2 - raised by Daniel Walsh
+  1. Sheet / dataset:     Outpatient vs Inpatient (PAS vs EHR)
+  2. Column:              NHS_Number
+  3. Issue type:          Cross-sheet mismatch
+  4. Affected rows:       577 (99.5% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Confirm with Daniel / Fiona Lawson whether each system is pseudonymised
+                          with a separate key; request a common linkage key before any cross-system
+                          KPI is built.
+     Detail:              384 of 384 distinct OP NHS Numbers (577 of 577 non-blank rows) are absent
+                          from Inpatient_Admissions - 0% overlap. IP (380 distinct) and ED (278)
+                          also share no numbers with OP or each other. Some gap is expected, total
+                          absence is not: suggests PAS and EHR exports use different
+                          pseudonymisation keys.
+     KPI / return:        Readmissions (KPI 11), RTT pathway tracking, cost per patient
+     Owner:               Daniel Walsh / Fiona Lawson
+     Test used:           COUNTIF lookup into IP column B; NHS_Number_Check column
+     Status:              Open - escalate
+
+DQ-005  [CRITICAL]  Task 2 - raised by Daniel Walsh
+  1. Sheet / dataset:     Inpatient_Admissions (EHR)
+  2. Column:              NHS_Number
+  3. Issue type:          Blank
+  4. Affected rows:       20 (1.7% of rows)
+  5. Severity:            Critical
+  6. Recommended action:  Trace via PDS and back-fill before SUS submission.
+     Detail:              20 episodes with no NHS Number.
+     KPI / return:        SUS submission
+     Owner:               EHR team / Clinical Coding
+     Test used:           COUNTBLANK
+     Status:              Open
+
+DQ-006  [MAJOR]  Task 2 - raised by Daniel Walsh
+  1. Sheet / dataset:     ED_Attendances (EDIS)
+  2. Column:              NHS_Number
+  3. Issue type:          Blank
+  4. Affected rows:       121 (12.5% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Separate genuine unknowns from data-entry gaps; trace the rest via PDS.
+     Detail:              121 attendances (12.5%) with no NHS Number. Some may be genuinely
+                          unidentified patients.
+     KPI / return:        A&E return / ECDS linkage
+     Owner:               ED reception / EDIS team
+     Test used:           COUNTBLANK
+     Status:              Open
+
+DQ-007  [MAJOR]  Task 2 - raised by Daniel Walsh
+  1. Sheet / dataset:     Outpatient_Appointments (PAS)
+  2. Column:              NHS_Number / Patient_Surname / Patient_DOB
+  3. Issue type:          Non-standard value
+  4. Affected rows:       52 (9.0% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Do not use NHS_Number alone as a patient key until PDS-verified; review
+                          the 16 OP numbers with PAS team.
+     Detail:              16 NHS Numbers in OP map to more than one surname and/or DOB (52 rows),
+                          e.g. 1847362905 = BROWN and DAVIES. Same pattern in IP (317 numbers) and
+                          ED (230 numbers).
+     KPI / return:        Patient-level counts, readmissions
+     Owner:               PAS team / Daniel Walsh
+     Test used:           pandas groupby NHS_Number -> nunique(surname, DOB)
+     Status:              Open
+
+DQ-008  [CRITICAL]  Task 3 - raised by Priya Chakrabarti
+  1. Sheet / dataset:     Inpatient_Admissions (EHR)
+  2. Column:              HRG_Code
+  3. Issue type:          Blank
+  4. Affected rows:       28 (2.3% of rows)
+  5. Severity:            Critical
+  6. Recommended action:  Send episode list to Marcus Reid for coding before SUS freeze; reconcile
+                          GBP figure with Priya before it is quoted to the Board.
+     Detail:              28 of 1,206 episodes (2.32%) uncoded -> completeness 97.68%, below the 98%
+                          standard. Revenue at risk GBP 51,800 (28 x GBP 1,850). Extract spans 6
+                          months: approx. 4.7/month, or approx. GBP 103,600/yr - not 28/month as the
+                          Brief assumes (GBP 621,600/yr).
+     KPI / return:        SUS / HRG income; HRG completeness (KPI 12)
+     Owner:               Marcus Reid (Clinical Coding)
+     Test used:           COUNTBLANK; Calculations sheet
+     Status:              Open
+
+DQ-009  [CRITICAL]  Task 4 - raised by Meeting action
+  1. Sheet / dataset:     Inpatient_Admissions (EHR)
+  2. Column:              Discharge_Date
+  3. Issue type:          Format error
+  4. Affected rows:       3 (0.2% of rows)
+  5. Severity:            Critical
+  6. Recommended action:  Convert to 09/10/2024, 20/11/2024, 19/12/2024 (LOS values already agree).
+                          Add date validation on EHR entry.
+     Detail:              3 dates written as text 'Month D YYYY' instead of DD/MM/YYYY: EP-10000812
+                          'October 9 2024', EP-10000814 'November 20 2024', EP-10001177 'December 19
+                          2024'.
+     KPI / return:        SUS (invalid discharge date); LOS, bed occupancy
+     Owner:               EHR team
+     Test used:           Pattern match: length > 10 / alphabetic
+     Status:              Open
+
+DQ-010  [MAJOR]  Task 4 - raised by Meeting action
+  1. Sheet / dataset:     Inpatient_Admissions (EHR)
+  2. Column:              Discharge_Date / Discharge_Method / Length_of_Stay
+  3. Issue type:          Blank
+  4. Affected rows:       31 (2.6% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Check each against the ward census: confirm still-inpatient or back-fill
+                          discharge.
+     Detail:              31 episodes with no discharge date, method, LOS or bed days. Admissions
+                          date back to Oct 2024 (8 in Oct) - unlikely all still in hospital.
+     KPI / return:        ALOS (KPI 10), bed occupancy (KPI 09)
+     Owner:               Patient flow team
+     Test used:           COUNTBLANK
+     Status:              Open
+
+DQ-011  [MAJOR]  Task 4 - raised by Meeting action
+  1. Sheet / dataset:     ED_Attendances (EDIS)
+  2. Column:              Arrival_Time
+  3. Issue type:          Format error
+  4. Affected rows:       17 (1.8% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Convert to 24-hour HH:MM; enforce time format in EDIS manual-entry screen.
+     Detail:              17 times in 12-hour 'h:mm AM/PM' format (e.g. ED-7000018 '3:53 PM')
+                          instead of 24-hour HH:MM. Total_ED_Time_Minutes is still correct for these
+                          rows. None fall on 14/11/2024, so not the EDIS-downtime DD-MM-YYYY issue
+                          (no DD-MM-YYYY entries found).
+     KPI / return:        ED 4-hour (KPI 01) if recalculated from times
+     Owner:               EDIS team
+     Test used:           Text ends in AM/PM
+     Status:              Open
+
+DQ-012  [MAJOR]  Task 4 - raised by Meeting action
+  1. Sheet / dataset:     Theatre_Utilisation (TMS)
+  2. Column:              Week_Ending
+  3. Issue type:          Format error
+  4. Affected rows:       2 (1.0% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Correct to the Sunday week-ending date.
+     Detail:              Every other week ends on a Sunday. 17/06/2024 (T1) should be 16/06/2024;
+                          31/03/2025 (T4) should be 30/03/2025. Both create a separate week bucket.
+     KPI / return:        Theatre utilisation (KPI 07) weekly trend
+     Owner:               Theatre management
+     Test used:           WEEKDAY of Week_Ending != Sunday
+     Status:              Open
+
+DQ-013  [MINOR]  Task 4 - raised by Meeting action
+  1. Sheet / dataset:     Outpatient_Appointments (PAS)
+  2. Column:              Appointment_Time
+  3. Issue type:          Format error
+  4. Affected rows:       1 (0.2% of rows)
+  5. Severity:            Minor
+  6. Recommended action:  Confirm actual time from PAS.
+     Detail:              APT-100200 time = 'TBC' (also has negative Waiting_Days and blank RTT
+                          fields).
+     KPI / return:        Clinic utilisation
+     Owner:               PAS team
+     Test used:           Value not HH:MM
+     Status:              Open
+
+DQ-014  [MINOR]  Task 4 - raised by Meeting action
+  1. Sheet / dataset:     All five sheets
+  2. Column:              All date columns
+  3. Issue type:          Format error
+  4. Affected rows:       0 (0.0% of rows)
+  5. Severity:            Minor
+  6. Recommended action:  Import with explicit DD/MM/YYYY locale in Power Query; store as true
+                          dates.
+     Detail:              All dates are text in UK DD/MM/YYYY. No US MM/DD swaps detected (every
+                          date parses as DD/MM and every discharge is on/after admission), but Excel
+                          on a US locale will mis-read days <= 12.
+     KPI / return:        All time-based KPIs
+     Owner:               Analytics
+     Test used:           Strict DD/MM/YYYY parse of every date column
+     Status:              Preventive
+
+DQ-015  [NONE FOUND]  Task 5 - raised by Tom Nguyen
+  1. Sheet / dataset:     Outpatient_Appointments (PAS)
+  2. Column:              Appointment_ID
+  3. Issue type:          Duplicate
+  4. Affected rows:       0 (0.0% of rows)
+  5. Severity:            None found
+  6. Recommended action:  No action. Keep the Appointment_ID_Check column as a weekly control.
+     Detail:              Checked: 580 rows, 580 unique IDs, 0 exact copies, 0 near-duplicates (same
+                          NHS No.+date+time). All IDs six digits - no truncated five-digit IDs.
+     KPI / return:        -
+     Owner:               Analytics
+     Test used:           COUNTIF on ID; key match on NHS+date+time
+     Status:              Closed - no issue
+
+DQ-016  [CRITICAL]  Task 5 - raised by Tom Nguyen
+  1. Sheet / dataset:     Inpatient_Admissions (EHR)
+  2. Column:              Episode_ID
+  3. Issue type:          Duplicate
+  4. Affected rows:       12 (1.0% of rows)
+  5. Severity:            Critical
+  6. Recommended action:  Remove the 2 exact copies; Clinical Coding to confirm the correct ward for
+                          the 4 near-duplicates. See Memo_Duplicates.
+     Detail:              6 IDs duplicated (12 rows). Exact copies: EP-10000091, EP-10000198 (2
+                          extra rows). Near-duplicates differing only in Ward_Code: EP-10000057,
+                          EP-10000254, EP-10000264, EP-10000553.
+     KPI / return:        SUS (duplicate episodes); admissions, bed days, HRG income
+     Owner:               Marcus Reid / EHR team
+     Test used:           COUNTIF on ID + field-by-field comparison
+     Status:              Flagged - Duplicate_Action column
+
+DQ-017  [MAJOR]  Task 5 - raised by Tom Nguyen
+  1. Sheet / dataset:     ED_Attendances (EDIS)
+  2. Column:              Attendance_ID
+  3. Issue type:          Duplicate
+  4. Affected rows:       18 (1.9% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Keep one row per ID after the ED lead confirms the complaint. See
+                          Memo_Duplicates.
+     Detail:              9 IDs duplicated (18 rows), all near-duplicates differing only in
+                          Chief_Complaint (e.g. ED-7000110 Urinary Symptoms vs ABDOMINAL PAIN).
+     KPI / return:        A&E return attendance count; 4-hour denominator
+     Owner:               ED clinical lead / EDIS team
+     Test used:           COUNTIF on ID + field-by-field comparison
+     Status:              Flagged - Duplicate_Action column
+
+DQ-018  [MAJOR]  Task 6 - raised by Sarah Okafor
+  1. Sheet / dataset:     Outpatient_Appointments (PAS)
+  2. Column:              Waiting_Days
+  3. Issue type:          Impossible value
+  4. Affected rows:       1 (0.2% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Excluded in Waiting_Days_Validated. Check referral date in PAS (possible
+                          transfer-in with pre-existing wait).
+     Detail:              APT-100200 = -3 days (Process Notes expected 4; only 1 in this export).
+                          Same row has Appointment_Time TBC and blank RTT_Status/RTT_Weeks - likely
+                          a part-entered record. 0 values exceed 104 weeks (max 423 days = 60.4
+                          weeks).
+     KPI / return:        RTT 18-week (KPI 04), 52-week waits (KPI 06)
+     Owner:               Patient Access team
+     Test used:           COUNTIF <0 and >728
+     Status:              Fixed in workbook - validated column
+
+DQ-019  [MAJOR]  Task 6 - raised by Sarah Okafor
+  1. Sheet / dataset:     Outpatient_Appointments (PAS)
+  2. Column:              Waiting_Days
+  3. Issue type:          Format error
+  4. Affected rows:       28 (4.8% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Waiting_Days_Validated derives these from RTT_Weeks x 7 and flags them.
+                          Daniel to fix the export column mapping.
+     Detail:              28 rows hold the text 'ATT' instead of a number - Attendance_Status
+                          shifted into this field. RTT_Weeks is populated for all 28, so the value
+                          is recoverable as RTT_Weeks x 7; 3 of these exceed 52 weeks.
+     KPI / return:        RTT 18-week, 52-week waits
+     Owner:               Daniel Walsh
+     Test used:           ISTEXT()
+     Status:              Fixed in workbook - derived and flagged
+
+DQ-020  [MINOR]  Task 6 - raised by Sarah Okafor
+  1. Sheet / dataset:     Outpatient_Appointments (PAS)
+  2. Column:              Waiting_Days / RTT_Weeks
+  3. Issue type:          Impossible value
+  4. Affected rows:       0 (0.0% of rows)
+  5. Severity:            Minor
+  6. Recommended action:  Ask Daniel to add Referral_Date and Clock_Start to APT_EXPORT so waits can
+                          be rebuilt from dates.
+     Detail:              Logic check passed: RTT_Weeks = Waiting_Days / 7 for all 551 numeric rows.
+                          The export has no Referral_Date / clock-start field, so Waiting_Days
+                          cannot be independently recalculated.
+     KPI / return:        RTT validation (KPI 18)
+     Owner:               Daniel Walsh
+     Test used:           ROUND(Waiting_Days/7,1) vs RTT_Weeks
+     Status:              Open - spec change
+
+DQ-021  [MAJOR]  Task 7 - raised by Daniel Walsh
+  1. Sheet / dataset:     All five sheets
+  2. Column:              Specialty_Code (Specialty_Referred in ED)
+  3. Issue type:          Non-standard value
+  4. Affected rows:       24 (0.5% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Done in workbook. Daniel to apply the Specialty_Code_Mapping table in the
+                          pipeline so GEN cannot re-enter.
+     Detail:              Retired code GEN found: OP 3, IP 10, ED 0, Theatre 2, Workforce 9 = 24
+                          before. All replaced with GM; 0 after. Every change logged with row,
+                          record key, old/new value.
+     KPI / return:        KPI_Summary (VLOOKUP broken since Oct 2023); specialty RTT/activity
+     Owner:               Daniel Walsh
+     Test used:           COUNTIF "GEN" before/after; GEN_Audit_Trail
+     Status:              Fixed in workbook - verified
+
+DQ-022  [MAJOR]  Task 8 - raised by Priya Chakrabarti
+  1. Sheet / dataset:     Workforce_Staffing (WRS)
+  2. Column:              Agency_Flag
+  3. Issue type:          Blank
+  4. Affected rows:       15 (1.0% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Report the test-excluded range with assumptions. Adaeze Obi to classify
+                          the 15 shifts from booking records; make Agency_Flag mandatory in WRS.
+     Detail:              15 of 1,560 shifts (0.96%) have no agency flag (bank shifts booked outside
+                          the agency module). Agency Y = 256. @ GBP 385/shift: best case GBP 98,560,
+                          worst case GBP 104,335 (range GBP 5,775). Excluding 24 ST-99 test rows:
+                          GBP 97,020 - GBP 102,795.
+     KPI / return:        Agency spend % of pay bill (KPI 13)
+     Owner:               Adaeze Obi / Priya Chakrabarti
+     Test used:           COUNTBLANK; Calculations sheet
+     Status:              Open
+
+DQ-023  [MAJOR]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     Outpatient_Appointments (PAS)
+  2. Column:              Consultant_Code
+  3. Issue type:          Blank
+  4. Affected rows:       5 (0.9% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Back-fill from clinic templates; check for unregistered locums.
+     Detail:              5 appointments with no consultant (APT-100156, -169, -191, -199, -201).
+     KPI / return:        Consultant-level activity
+     Owner:               PAS team
+     Test used:           COUNTBLANK
+     Status:              Open
+
+DQ-024  [MINOR]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     Outpatient_Appointments (PAS)
+  2. Column:              Clinic_Code
+  3. Issue type:          Non-standard value
+  4. Affected rows:       2 (0.3% of rows)
+  5. Severity:            Minor
+  6. Recommended action:  Re-map CL-OLD to active clinic; remove APT-100199 if test.
+     Detail:              CL-OLD (APT-100186) and CL-DEP (APT-100199) - retired / decommissioned
+                          clinics.
+     KPI / return:        Clinic activity
+     Owner:               PAS team
+     Test used:           Value not in active clinic list
+     Status:              Open
+
+DQ-025  [CRITICAL]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     Outpatient_Appointments (PAS)
+  2. Column:              RTT_Status / RTT_Weeks
+  3. Issue type:          Blank
+  4. Affected rows:       1 (0.2% of rows)
+  5. Severity:            Critical
+  6. Recommended action:  Validate pathway status in PAS.
+     Detail:              APT-100200 has blank RTT_Status and RTT_Weeks.
+     KPI / return:        RTT return
+     Owner:               Patient Access team
+     Test used:           COUNTBLANK
+     Status:              Open
+
+DQ-026  [MINOR]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     Outpatient_Appointments (PAS)
+  2. Column:              Postcode / Referral_Source
+  3. Issue type:          Non-standard value
+  4. Affected rows:       4 (0.7% of rows)
+  5. Severity:            Minor
+  6. Recommended action:  Back-fill from PDS; standardise referral source list.
+     Detail:              2 blank postcodes, 1 dummy 'XX1 1XX', 1 Referral_Source 'Other' (not
+                          GP/CONS/ED/SELF).
+     KPI / return:        Demographic analysis
+     Owner:               PAS team
+     Test used:           Blank / pattern check
+     Status:              Open
+
+DQ-027  [MAJOR]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     Inpatient_Admissions (EHR)
+  2. Column:              Admission_Type
+  3. Issue type:          Non-standard value
+  4. Affected rows:       13 (1.1% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Recode to ELEC / EMER; add drop-down.
+     Detail:              9 'Elective' and 4 'emergency' instead of ELEC / EMER.
+     KPI / return:        Elective vs emergency ALOS; cancelled-ops denominator
+     Owner:               EHR team
+     Test used:           Value not in code list
+     Status:              Open
+
+DQ-028  [MINOR]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     Inpatient_Admissions (EHR)
+  2. Column:              Discharge_Method
+  3. Issue type:          Non-standard value
+  4. Affected rows:       15 (1.2% of rows)
+  5. Severity:            Minor
+  6. Recommended action:  Recode after checking notes.
+     Detail:              15 'Discharged' (not a code; should be HOME or TRANSFER).
+     KPI / return:        Discharge destination analysis
+     Owner:               EHR team
+     Test used:           Value not in code list
+     Status:              Open
+
+DQ-029  [MAJOR]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     Inpatient_Admissions (EHR)
+  2. Column:              Ward_Code
+  3. Issue type:          Non-standard value
+  4. Affected rows:       3 (0.2% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Confirm the real ward and correct.
+     Detail:              3 episodes on W-08, decommissioned Feb 2024, admitted Nov 2024-Feb 2025
+                          (EP-10000850, -867, -1002).
+     KPI / return:        Bed occupancy (KPI 09)
+     Owner:               Patient flow team
+     Test used:           COUNTIF W-08
+     Status:              Open
+
+DQ-030  [MAJOR]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     Inpatient_Admissions (EHR)
+  2. Column:              Length_of_Stay / Bed_Days
+  3. Issue type:          Impossible value
+  4. Affected rows:       6 (0.5% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Recalculate LOS = Discharge_Date - Admission_Date; do not use stored LOS.
+     Detail:              6 negative LOS (-1 to -3) although discharge is after admission (e.g.
+                          EP-10000154: 13/10->19/10 = 6 days, recorded -3). Bed_Days also differs
+                          from LOS on 34 rows.
+     KPI / return:        ALOS (KPI 10), bed occupancy
+     Owner:               Analytics / EHR team
+     Test used:           COUNTIF <0; date difference check
+     Status:              Open
+
+DQ-031  [MAJOR]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     Inpatient_Admissions (EHR)
+  2. Column:              Readmission_Flag
+  3. Issue type:          Blank
+  4. Affected rows:       44 (3.6% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Back-fill from NHS Number + dates (governance decision Nov 2024) once a
+                          reliable patient key exists.
+     Detail:              44 blank (Process Notes said 41).
+     KPI / return:        30-day readmission rate (KPI 11)
+     Owner:               Analytics
+     Test used:           COUNTBLANK
+     Status:              Open
+
+DQ-032  [CRITICAL]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     Inpatient_Admissions (EHR)
+  2. Column:              ICD10_Code / OPCS4_Code / Consultant_Code
+  3. Issue type:          Blank
+  4. Affected rows:       27 (2.2% of rows)
+  5. Severity:            Critical
+  6. Recommended action:  Include in Clinical Coding backlog with HRG blanks.
+     Detail:              27 blank ICD-10, 27 blank OPCS-4, 28 blank Consultant_Code.
+     KPI / return:        SUS (diagnosis/procedure required); HRG grouping
+     Owner:               Marcus Reid (Clinical Coding)
+     Test used:           COUNTBLANK
+     Status:              Open
+
+DQ-033  [CRITICAL]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     ED_Attendances (EDIS)
+  2. Column:              Four_Hour_Breach
+  3. Issue type:          Blank
+  4. Affected rows:       39 (4.0% of rows)
+  5. Severity:            Critical
+  6. Recommended action:  Derive breach flag by formula from total minutes; fix the source times
+                          first.
+     Detail:              39 blank breach flags: 35 have no departure time, 4 have negative total
+                          time. Flag agrees with Total_ED_Time > 240 on every other row.
+     KPI / return:        ED 4-hour (KPI 01), A&E return
+     Owner:               EDIS team / Sarah Okafor
+     Test used:           COUNTBLANK; Y/N vs >240 min
+     Status:              Open
+
+DQ-034  [CRITICAL]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     ED_Attendances (EDIS)
+  2. Column:              Departure_Time / Total_ED_Time_Minutes
+  3. Issue type:          Blank
+  4. Affected rows:       35 (3.6% of rows)
+  5. Severity:            Critical
+  6. Recommended action:  Back-fill from EDIS audit log.
+     Detail:              35 attendances with no departure time; 28 with no Seen_by_Clinician_Time.
+     KPI / return:        ED 4-hour, A&E return
+     Owner:               EDIS team
+     Test used:           COUNTBLANK
+     Status:              Open
+
+DQ-035  [MAJOR]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     ED_Attendances (EDIS)
+  2. Column:              Total_ED_Time_Minutes
+  3. Issue type:          Impossible value
+  4. Affected rows:       4 (0.4% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Recalculate from arrival/departure times.
+     Detail:              4 negative totals (ED-7000256, -402, -506, -740) though departure is after
+                          arrival.
+     KPI / return:        ED 4-hour
+     Owner:               EDIS team
+     Test used:           COUNTIF <0
+     Status:              Open
+
+DQ-036  [MAJOR]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     ED_Attendances (EDIS)
+  2. Column:              Seen_by_Clinician_Time
+  3. Issue type:          Impossible value
+  4. Affected rows:       312 (32.2% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Investigate EDIS time-stamping; exclude from time-to-treatment until
+                          fixed.
+     Detail:              312 records show the clinician seeing the patient after departure
+                          (relative to arrival, allowing for midnight).
+     KPI / return:        Time-to-clinician; LWBS validity
+     Owner:               EDIS team
+     Test used:           (Seen-Arrival) mod 1440 > (Departure-Arrival) mod 1440
+     Status:              Open
+
+DQ-037  [MAJOR]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     ED_Attendances (EDIS)
+  2. Column:              Triage_Category
+  3. Issue type:          Impossible value
+  4. Affected rows:       9 (0.9% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Correct from triage notes.
+     Detail:              5 x category 6 and 4 x category 0 (valid range 1-5).
+     KPI / return:        Triage-level performance
+     Owner:               ED clinical lead
+     Test used:           Value outside 1-5
+     Status:              Open
+
+DQ-038  [MAJOR]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     ED_Attendances (EDIS)
+  2. Column:              Departure_Code
+  3. Issue type:          Non-standard value
+  4. Affected rows:       261 (26.9% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Agree code mapping with EDIS team; validate DIED records urgently.
+     Detail:              120 'LEFT' (not a defined code - LWBS or left after treatment?) and 141
+                          'DIED' (14.6% of attendances - clinically implausible; likely a mis-mapped
+                          code).
+     KPI / return:        LWBS rate (KPI 02); mortality
+     Owner:               EDIS team / ED clinical lead
+     Test used:           Value not in ADM/DISC/LWBS
+     Status:              Open - escalate
+
+DQ-039  [MINOR]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     ED_Attendances (EDIS)
+  2. Column:              Chief_Complaint / Specialty_Referred
+  3. Issue type:          Non-standard value
+  4. Affected rows:       13 (1.3% of rows)
+  5. Severity:            Minor
+  6. Recommended action:  Standardise to upper case / coded list; use NONE only.
+     Detail:              Chief_Complaint has 48 spellings of 21 complaints (case variants).
+                          Specialty_Referred uses both 'NONE' (835) and 'N/A' (13).
+     KPI / return:        Complaint analysis
+     Owner:               EDIS team
+     Test used:           Case-folded distinct count
+     Status:              Open
+
+DQ-040  [MAJOR]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     Theatre_Utilisation (TMS)
+  2. Column:              Theatre_ID
+  3. Issue type:          Non-standard value
+  4. Affected rows:       1 (0.5% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Recode to T3.
+     Detail:              'Theatre One' on 12/05/2024 - 8 sessions, so actually T3 (T3 has only 51
+                          weeks).
+     KPI / return:        Utilisation by theatre
+     Owner:               Theatre management
+     Test used:           Value not T1-T4
+     Status:              Open
+
+DQ-041  [MAJOR]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     Theatre_Utilisation (TMS)
+  2. Column:              Sessions_Used
+  3. Issue type:          Impossible value
+  4. Affected rows:       4 (1.9% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Correct Sessions_Available from TMS lists; retire the "fudge" rule.
+     Detail:              4 weeks with Sessions_Used > Sessions_Available (110%, 107.1% x2, 125%) -
+                          late cancellations not deducted (Pipeline Issue 5).
+     KPI / return:        Theatre utilisation (KPI 07)
+     Owner:               Theatre management / Daniel Walsh
+     Test used:           Used > Available
+     Status:              Open
+
+DQ-042  [MAJOR]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     Theatre_Utilisation (TMS)
+  2. Column:              Utilisation_Pct
+  3. Issue type:          Impossible value
+  4. Affected rows:       7 (3.4% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Always calculate the % from sessions; never use the stored column.
+     Detail:              7 rows where stored % != Used/Available (e.g. 23/06/2024 T2 shows 41.5%,
+                          should be 50.0%).
+     KPI / return:        Theatre utilisation (KPI 07)
+     Owner:               Analytics
+     Test used:           ROUND(Used/Availablex100,1) vs stored
+     Status:              Open
+
+DQ-043  [CRITICAL]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     Theatre_Utilisation (TMS)
+  2. Column:              Cancellations_Trust / Cancellations_Patient
+  3. Issue type:          Blank
+  4. Affected rows:       53 (25.5% of rows)
+  5. Severity:            Critical
+  6. Recommended action:  Back-fill from TMS cancellation log; blank must not be read as 0.
+     Detail:              30 blank Trust cancellations, 23 blank patient cancellations.
+     KPI / return:        Cancelled Operations statutory return
+     Owner:               Theatre management
+     Test used:           COUNTBLANK
+     Status:              Open
+
+DQ-044  [MINOR]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     Theatre_Utilisation (TMS)
+  2. Column:              Cases_Completed
+  3. Issue type:          Impossible value
+  4. Affected rows:       15 (7.2% of rows)
+  5. Severity:            Minor
+  6. Recommended action:  Confirm whether add-ons are counted; record them separately.
+     Detail:              15 weeks with more cases completed than planned (likely emergency add-ons
+                          not in the plan).
+     KPI / return:        Case completion rate
+     Owner:               Theatre management
+     Test used:           Completed > Planned
+     Status:              Open
+
+DQ-045  [MAJOR]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     Workforce_Staffing (WRS)
+  2. Column:              Staff_ID
+  3. Issue type:          Non-standard value
+  4. Affected rows:       24 (1.5% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Exclude (flagged in Test_Record_Check); Daniel to filter in export.
+     Detail:              24 ST-99 test records from the WRS training environment (4 flagged
+                          agency).
+     KPI / return:        Agency spend, staffing KPIs
+     Owner:               Daniel Walsh
+     Test used:           LEFT(Staff_ID,5)="ST-99"
+     Status:              Flagged
+
+DQ-046  [MAJOR]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     Workforce_Staffing (WRS)
+  2. Column:              Staff_ID
+  3. Issue type:          Blank
+  4. Affected rows:       18 (1.2% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Back-fill from roster.
+     Detail:              18 shifts with no staff ID (3 flagged agency).
+     KPI / return:        Staffing, agency
+     Owner:               Adaeze Obi
+     Test used:           COUNTBLANK
+     Status:              Open
+
+DQ-047  [MAJOR]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     Workforce_Staffing (WRS)
+  2. Column:              Absence_Flag
+  3. Issue type:          Impossible value
+  4. Affected rows:       89 (5.7% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Clarify with Adaeze whether Hours_Worked is copied from roster; zero hours
+                          for absences.
+     Detail:              All 89 absence = Y shifts also show full hours worked; 9 further
+                          Absence_Flag blanks.
+     KPI / return:        Sickness/absence; pay cost
+     Owner:               Adaeze Obi
+     Test used:           Absence=Y and Hours_Worked>0
+     Status:              Open
+
+DQ-048  [MAJOR]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     Workforce_Staffing (WRS)
+  2. Column:              Overtime_Hours / Hours_Rostered
+  3. Issue type:          Impossible value
+  4. Affected rows:       11 (0.7% of rows)
+  5. Severity:            Major
+  6. Recommended action:  Recalculate overtime = MAX(0, worked - rostered); correct roster hours.
+     Detail:              8 negative overtime values (Hours_Worked = Hours_Rostered) and 3 shifts
+                          rostered for 0 hours though worked.
+     KPI / return:        Overtime cost
+     Owner:               Adaeze Obi
+     Test used:           <0; =0
+     Status:              Open
+
+DQ-049  [MINOR]  Additional finding - raised by Analyst
+  1. Sheet / dataset:     Workforce_Staffing (WRS)
+  2. Column:              Staff_Grade / Shift_Type / Ward_Code
+  3. Issue type:          Non-standard value
+  4. Affected rows:       17 (1.1% of rows)
+  5. Severity:            Minor
+  6. Recommended action:  Map D/N/L to DAY/NIGHT/LONG; get actual grade and ward.
+     Detail:              9 'Doctor' (not a grade), 5 abbreviated shift types (D/N/L), 3 shifts on
+                          decommissioned W-08.
+     KPI / return:        Grade mix, ward staffing
+     Owner:               Adaeze Obi
+     Test used:           Value not in code list
+     Status:              Open
+
+====================================================================================================
+END OF LOG
+====================================================================================================

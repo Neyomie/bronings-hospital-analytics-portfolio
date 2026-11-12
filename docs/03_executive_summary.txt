@@ -1,0 +1,45 @@
+EXECUTIVE SUMMARY: DATA QUALITY AND PERFORMANCE (PHASE 3)
+To: Tom Nguyen | From: Advanced Healthcare Data Analyst | For: Monday Ops meeting
+
+Bottom line: we cannot reliably identify patients across systems. Fix that first. Orthopaedics is our worst service on almost every measure.
+
+
+1. TOP 3 DATA QUALITY ISSUES
+
+1) Patient identity is broken (Critical). 144 records have no NHS Number (Outpatients 3, Inpatients 20, ED 121). No NHS Number appears in more than one system. 317 inpatient and 230 ED NHS Numbers belong to more than one surname. Impact: the readmission rate reads 9.58% on existing flags but 17.58% when re-derived, and we cannot say which is true.
+
+2) Coding gaps put income and SUS at risk (Critical). 28 episodes have no HRG code: 97.68% complete against the 98% standard, so GBP 51,800 is unpaid in this extract. 27 more lack diagnosis and procedure codes, and 6 episodes are duplicated.
+
+3) The ED 4-hour figure cannot be audited (Critical). 39 breach flags are blank and 35 attendances have no departure time. 141 records (14.6%) are coded DIED and 120 use an undefined code, LEFT. The figure sent to NHS England is counted by eye.
+
+
+2. TOP 3 OPERATIONAL PERFORMANCE CONCERNS
+
+1) RTT. 81.17% of pathways are within 18 weeks, against 92%. On open pathways only (the NHS England measure) it is 41.54%. 9 of 10 specialties breach; Orthopaedics is worst at 57.45%. The 90th percentile open wait is 267 days.
+
+2) Outpatient DNAs. 14.07% against our target of under 8%. Worst: Orthopaedics 38.64%, Urology 20.75%, Ophthalmology 17.24%. 74 of 76 DNAs were GP referrals,.
+
+3) Theatre capacity. Utilisation is 70.75% on sessions, against 85%: 636 sessions unused a year. At an assumed GBP 4,516.18 per session, that is GBP 239,357.70 a month. Closing the gap to 85% alone is worth GBP 116,630.43 a month.
+
+
+
+3. TOP 3 RECOMMENDATIONS (IN PRIORITY ORDER)
+
+1) This week: fix patient identity. Daniel and Fiona to supply a common linkage key across systems. PAS and EDIS teams to trace the 144 missing NHS Numbers through PDS. No cross-system figure, including readmissions, goes to the Board until this is done.
+
+2) Before the March submissions: clean the statutory data. Marcus to code the 28 HRG and 27 diagnosis/procedure blanks before the SUS freeze. Remove duplicate records. Replace the manual ED count with a formula-driven breach flag and agree the ED departure codes with EDIS.
+
+3) Target Orthopaedics, worst on DNA, RTT and readmissions (14.78%). Send text reminders for GP-referred appointments, validate the 19 open Orthopaedic pathways and move unused theatre sessions to Orthopaedic lists. Also take one utilisation definition to governance: the exports give 70.75%, matching Finance's 71%, not the 63% in the brief.
+
+
+4. QUESTIONS I CANNOT YET ANSWER
+
+1) What is our true readmission rate? This needs a reliable patient linkage key.
+
+2) What does idle theatre time actually cost? No export contains a cost per session; my figure is back-calculated from the brief.
+
+3) How many patients have waited over 52 and over 104 weeks? The outpatient extract shows 2 and 0, not the reported 312 and 47. It is not the full waiting list and has no referral or clock-start date, which also stops us explaining the PAS vs Unify2 gap.
+
+4) What is our actual agency spend? 15 shifts have no agency flag (8-week range GBP 97,020 to GBP 102,795), and there is no pay ledger to reconcile it against.
+
+5) What is our bed occupancy? There is no midnight census, and 31 admissions have no discharge date.
